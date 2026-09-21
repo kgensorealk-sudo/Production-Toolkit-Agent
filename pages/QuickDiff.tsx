@@ -1,0 +1,417 @@
+
+import React, { useState, useRef, useEffect } from 'react';
+import { diffLines, diffWordsWithSpace, Change } from 'diff';
+import Toast from '../components/Toast';
+import LoadingOverlay from '../components/LoadingOverlay';
+import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
+import { useSettings } from '../contexts/SettingsContext';
+import { Cpu, ChevronDown, ChevronUp, GitCompare } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+
+const QuickDiff: React.FC = () => {
+    const { isHardwareAccelerated } = useSettings();
+    const [origText, setOrigText] = useState('');
+    const [changedText, setChangedText] = useState('');
+    const [showResults, setShowResults] = useState(false);
+    const [diffStats, setDiffStats] = useState('');
+    const [toast, setToast] = useState<{msg: string, type: 'success'|'warn'|'error'} | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [currentChangeIndex, setCurrentChangeIndex] = useState(0);
+    const [changeCount, setChangeCount] = useState(0);
+    const [rowsData, setRowsData] = useState<any[]>([]);
+    const workerRef = useRef<Worker | null>(null);
+    const diffContainerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        return () => {
+            if (workerRef.current) {
+                workerRef.current.terminate();
+            }
+        };
+    }, []);
+
+    const escapeHtml = (unsafe: string) => unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const buildLines = (diffParts: Change[], isLeft: boolean) => {
+        let lines: string[] = [];
+        let currentLine = "";
+        let activeClass: string | null = null;
+
+        const append = (text: string, cls: string | null) => {
+            if (!text) return;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (char === '\n') {
+                    if (activeClass) currentLine += '</span>';
+                    lines.push(currentLine);
+                    currentLine = "";
+                    if (activeClass) currentLine += `<span class="${activeClass}">`;
+                } else {
+                    if (cls !== activeClass) {
+                        if (activeClass) currentLine += '</span>';
+                        activeClass = cls;
+                        if (activeClass) currentLine += `<span class="${activeClass}">`;
+                    }
+                    currentLine += escapeHtml(char);
+                }
+            }
+        };
+
+        diffParts.forEach(part => {
+            if (part.removed && isLeft) append(part.value, 'bg-red-200 text-red-900 line-through decoration-red-900/50');
+            else if (part.added && !isLeft) append(part.value, 'bg-emerald-200 text-emerald-900 font-bold');
+            else if (!part.added && !part.removed) append(part.value, null);
+        });
+
+        if (activeClass) currentLine += '</span>';
+        lines.push(currentLine);
+        return lines;
+    };
+
+    const scrollToChange = (direction: 'next' | 'prev') => {
+        if (!diffContainerRef.current || changeCount === 0) return;
+
+        let nextIndex = direction === 'next' ? currentChangeIndex + 1 : currentChangeIndex - 1;
+        if (nextIndex > changeCount) nextIndex = 1;
+        if (nextIndex < 1) nextIndex = changeCount;
+
+        const targetRow = diffContainerRef.current.querySelector(`tr[data-change-index-group="${nextIndex}"]`);
+        if (targetRow) {
+            targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setCurrentChangeIndex(nextIndex);
+        }
+    };
+
+    const renderRows = (data: any[]) => {
+        let localChangeCount = 1;
+        let currentBlockIdx = 0;
+        return data.map((row: any) => {
+            const { id, type, lContent, rContent, lNum, rNum, isFirstInBlock } = row;
+            
+            if (isFirstInBlock) {
+                currentBlockIdx = localChangeCount++;
+            } else if (type === 'equal') {
+                currentBlockIdx = 0;
+            }
+
+            let lClass = '';
+            let rClass = '';
+            let lNumClass = 'bg-slate-50'; 
+            let rNumClass = 'bg-slate-50';
+
+            if (type === 'delete') {
+                lClass = 'bg-red-50';
+                lNumClass = 'bg-red-100';
+            } else if (type === 'insert') {
+                rClass = 'bg-emerald-50';
+                rNumClass = 'bg-emerald-100';
+            } else if (type === 'replace') {
+                if (lContent !== undefined) {
+                    lClass = 'bg-red-50';
+                    lNumClass = 'bg-red-100';
+                }
+                if (rContent !== undefined) {
+                    rClass = 'bg-emerald-50';
+                    rNumClass = 'bg-emerald-100';
+                }
+            }
+
+            const isChange = type !== 'equal';
+
+            return (
+                <tr 
+                    key={id} 
+                    className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
+                    data-change-row={isChange ? 'true' : undefined}
+                    data-change-index={isFirstInBlock ? currentBlockIdx : undefined}
+                    data-change-index-group={isChange ? currentBlockIdx : undefined}
+                >
+                    <td className={`w-12 text-right text-xs text-slate-500 p-1 border-r border-slate-200 select-none font-mono ${lNumClass}`}>{lNum}</td>
+                    <td className={`p-1 font-mono text-sm text-slate-700 whitespace-pre-wrap break-words leading-tight ${lClass}`} dangerouslySetInnerHTML={{__html: lContent || ''}}></td>
+                    <td className={`w-12 text-right text-xs text-slate-500 p-1 border-r border-slate-200 border-l select-none font-mono ${rNumClass}`}>{rNum}</td>
+                    <td className={`p-1 font-mono text-sm text-slate-700 whitespace-pre-wrap break-words leading-tight ${rClass}`} dangerouslySetInnerHTML={{__html: rContent || ''}}></td>
+                </tr>
+            );
+        });
+    };
+
+    const diffRows = React.useMemo(() => renderRows(rowsData), [rowsData]);
+
+    useEffect(() => {
+        if (!diffContainerRef.current) return;
+        
+        // Remove old highlights
+        const oldHighlights = diffContainerRef.current.querySelectorAll('.active-change-highlight');
+        oldHighlights.forEach(el => el.classList.remove('active-change-highlight', 'bg-orange-50/50', 'ring-1', 'ring-orange-200', 'ring-inset', 'z-10', 'relative'));
+
+        if (currentChangeIndex === 0) return;
+
+        // Add new highlights
+        const newHighlights = diffContainerRef.current.querySelectorAll(`[data-change-index-group="${currentChangeIndex}"]`);
+        newHighlights.forEach(el => el.classList.add('active-change-highlight', 'bg-orange-50/50', 'ring-1', 'ring-orange-200', 'ring-inset', 'z-10', 'relative'));
+    }, [currentChangeIndex, rowsData]);
+
+    const runDiff = () => {
+        if (!origText && !changedText) {
+            setToast({ msg: 'Please enter text to compare', type: 'warn' });
+            return;
+        }
+
+        setIsLoading(true);
+
+        if (isHardwareAccelerated) {
+            if (workerRef.current) workerRef.current.terminate();
+            
+            workerRef.current = new Worker(new URL('../utils/diffWorker.ts', import.meta.url), { type: 'module' });
+            
+            workerRef.current.onmessage = (e) => {
+                const { stats, rowsData: incomingRows, error } = e.data;
+                if (error) {
+                    setToast({ msg: `Worker Error: ${error}`, type: 'error' });
+                    setIsLoading(false);
+                    return;
+                }
+                setDiffStats(stats);
+                setRowsData(incomingRows);
+                
+                let count = 0;
+                incomingRows.forEach((r: any) => { if (r.type !== 'equal' && r.isFirstInBlock) count++; });
+                setChangeCount(count);
+                setCurrentChangeIndex(count > 0 ? 1 : 0);
+
+                setShowResults(true);
+                setIsLoading(false);
+            };
+
+            workerRef.current.postMessage({ origText, changedText });
+        } else {
+            setTimeout(() => {
+                const diff = diffLines(origText, changedText);
+                let added = 0, deleted = 0;
+                diff.forEach(part => {
+                    if (part.added) added += part.value.length;
+                    if (part.removed) deleted += part.value.length;
+                });
+                setDiffStats(`${added} added, ${deleted} removed`);
+
+                let localChangeCount = 0;
+                let rows: any[] = [];
+                let leftLineNum = 1;
+                let rightLineNum = 1;
+
+                let i = 0;
+                while(i < diff.length) {
+                    const current = diff[i];
+                    let type = 'equal';
+                    let leftVal = '', rightVal = '';
+
+                    if (current.removed && diff[i+1]?.added) {
+                        type = 'replace';
+                        leftVal = current.value;
+                        rightVal = diff[i+1].value;
+                        i += 2;
+                    } else if (current.removed) {
+                        type = 'delete';
+                        leftVal = current.value;
+                        i++;
+                    } else if (current.added) {
+                        type = 'insert';
+                        rightVal = current.value;
+                        i++;
+                    } else {
+                        leftVal = rightVal = current.value;
+                        i++;
+                    }
+
+                    let leftLines: string[] = [];
+                    let rightLines: string[] = [];
+
+                    if (type === 'replace') {
+                        const wordDiff = diffWordsWithSpace(leftVal, rightVal);
+                        leftLines = buildLines(wordDiff, true);
+                        rightLines = buildLines(wordDiff, false);
+                    } else if (type === 'delete') {
+                        leftLines = buildLines([{removed: true, value: leftVal} as Change], true);
+                    } else if (type === 'insert') {
+                        rightLines = buildLines([{added: true, value: rightVal} as Change], false);
+                    } else {
+                        const lines = leftVal.split('\n');
+                        if (lines.length > 0 && lines[lines.length-1] === '') lines.pop(); 
+                        leftLines = lines.map(escapeHtml);
+                        rightLines = [...leftLines];
+                    }
+
+                    const maxRows = Math.max(leftLines.length, rightLines.length);
+                    for (let r = 0; r < maxRows; r++) {
+                        const lContent = leftLines[r];
+                        const rContent = rightLines[r];
+                        const lNum = lContent !== undefined ? leftLineNum++ : '';
+                        const rNum = rContent !== undefined ? rightLineNum++ : '';
+                        
+                        const isChange = type !== 'equal';
+                        const isFirstInBlock = isChange && r === 0;
+                        if (isFirstInBlock) localChangeCount++;
+
+                        rows.push({
+                            id: `${i}-${r}`,
+                            type,
+                            lContent,
+                            rContent,
+                            lNum,
+                            rNum,
+                            isFirstInBlock
+                        });
+                    }
+                }
+                setRowsData(rows);
+                setChangeCount(localChangeCount);
+                setCurrentChangeIndex(localChangeCount > 0 ? 1 : 0);
+                setShowResults(true);
+                setIsLoading(false);
+            }, 50);
+        }
+    };
+
+    // Keyboard Shortcuts
+    useKeyboardShortcuts({
+        onPrimary: runDiff,
+        onClear: () => {
+            setOrigText('');
+            setChangedText('');
+            setShowResults(false);
+            setToast({msg: 'Cleared all fields', type:'warn'});
+        }
+    }, [origText, changedText]);
+
+    return (
+        <div className="max-w-full mx-auto px-2 py-8 sm:px-4 lg:px-6 flex flex-col min-h-[calc(100vh-120px)]">
+            <div className="mb-10 text-center animate-fade-in shrink-0">
+                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight sm:text-4xl mb-3">Quick Text Diff Checker</h1>
+                <p className="text-lg text-slate-500 max-w-2xl mx-auto">Compare text side-by-side with precision highlights.</p>
+            </div>
+
+            {!showResults ? (
+                <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-8 flex-grow min-h-[500px] animate-scale-in">
+                    {isLoading && <LoadingOverlay message={isHardwareAccelerated ? "GPU-Accelerated Analysis..." : "Analyzing Differences..."} color={isHardwareAccelerated ? "amber" : "orange"} />}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-orange-100 transition-all duration-300 min-h-[500px]">
+                        <div className="bg-slate-50 px-5 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
+                            <label className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white border border-slate-200 text-xs text-slate-500 font-mono shadow-sm">A</span>
+                                Original Text
+                            </label>
+                            {origText && <button onClick={() => setOrigText('')} title="Alt+Delete" className="text-xs text-slate-400 hover:text-slate-600">Clear</button>}
+                        </div>
+                        <textarea 
+                            value={origText}
+                            onChange={(e) => setOrigText(e.target.value)}
+                            className="w-full flex-grow p-6 text-sm font-mono text-slate-800 bg-white border-0 focus:ring-0 outline-none resize-none transition-colors placeholder-slate-300" 
+                            placeholder="Paste original text here..."
+                            spellCheck={false}
+                        />
+                    </div>
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-emerald-100 transition-all duration-300 min-h-[500px]">
+                        <div className="bg-slate-50 px-5 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
+                            <label className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white border border-slate-200 text-xs text-slate-500 font-mono shadow-sm">B</span>
+                                Modified Text
+                            </label>
+                            {changedText && <button onClick={() => setChangedText('')} title="Alt+Delete" className="text-xs text-slate-400 hover:text-slate-600">Clear</button>}
+                        </div>
+                        <textarea 
+                            value={changedText}
+                            onChange={(e) => setChangedText(e.target.value)}
+                            className="w-full flex-grow p-6 text-sm font-mono text-slate-800 bg-white border-0 focus:ring-0 outline-none resize-none transition-colors placeholder-slate-300" 
+                            placeholder="Paste modified text here..."
+                            spellCheck={false}
+                        />
+                    </div>
+                </div>
+            ) : (
+                <div className="border border-slate-200 rounded-2xl shadow-sm bg-white animate-fade-in ring-1 ring-slate-900/5 relative">
+                    <div className="bg-slate-50/95 border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center sticky top-0 z-30 backdrop-blur-md rounded-t-2xl gap-3 shadow-2xs">
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-slate-700">Comparison Result</span>
+                            <span className="text-xs font-mono font-medium text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">{diffStats}</span>
+                            {isHardwareAccelerated && (
+                                <span className="flex items-center gap-1 text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100 uppercase tracking-widest">
+                                    <Cpu size={10} />
+                                    Accelerated
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Top Toolbar Navigation Controls - Fixed in Header so it never obscures panel content */}
+                        {changeCount > 0 && (
+                            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-1 shadow-2xs">
+                                <div className="flex items-center gap-2 pr-2.5 border-r border-slate-200">
+                                    <div className="w-6 h-6 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                                        <GitCompare className="w-3.5 h-3.5 text-indigo-600" strokeWidth={2.5} />
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Changes:</span>
+                                        <span className="text-xs font-black text-slate-900 font-mono tabular-nums">
+                                            {currentChangeIndex} <span className="text-slate-300">/</span> {changeCount}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <button 
+                                        onClick={() => scrollToChange('prev')}
+                                        className="p-1 hover:bg-slate-100 active:bg-slate-200 rounded-md transition-all text-slate-600 hover:text-indigo-600 group"
+                                        title="Previous Change (Shift+Tab)"
+                                    >
+                                        <ChevronUp className="w-4 h-4 group-active:-translate-y-0.5 transition-transform" strokeWidth={2.5} />
+                                    </button>
+                                    <button 
+                                        onClick={() => scrollToChange('next')}
+                                        className="p-1 hover:bg-slate-100 active:bg-slate-200 rounded-md transition-all text-slate-600 hover:text-indigo-600 group"
+                                        title="Next Change (Tab)"
+                                    >
+                                        <ChevronDown className="w-4 h-4 group-active:translate-y-0.5 transition-transform" strokeWidth={2.5} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="relative flex flex-col rounded-b-2xl overflow-hidden h-full">
+                        <div ref={diffContainerRef} className="max-h-[70vh] overflow-auto custom-scrollbar">
+                            <table className="w-full text-sm font-mono border-collapse table-fixed bg-white">
+                                <colgroup>
+                                    <col className="w-12 border-r border-slate-200" />
+                                    <col className="w-[calc(50%-3rem)]" />
+                                    <col className="w-12 border-r border-slate-200 border-l border-slate-200" />
+                                    <col className="w-[calc(50%-3rem)]" />
+                                </colgroup>
+                                <tbody>
+                                    {diffRows}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="mt-8 flex flex-col sm:flex-row justify-center gap-5">
+                {!showResults ? (
+                    <button 
+                        onClick={runDiff} 
+                        disabled={isLoading}
+                        title="Ctrl+Enter"
+                        className={`flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 px-8 rounded-xl shadow-lg shadow-orange-500/30 transform transition-all active:scale-95 ${isLoading ? 'opacity-80 cursor-wait' : 'hover:-translate-y-0.5'}`}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                        Find Difference
+                    </button>
+                ) : (
+                    <button onClick={() => { setShowResults(false); setOrigText(''); setChangedText(''); }} title="Alt+Delete" className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-bold py-3.5 px-8 rounded-xl shadow-sm border border-slate-200 transition-colors hover:border-slate-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        Clear & Start Over
+                    </button>
+                )}
+            </div>
+             {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+    );
+};
+
+export default QuickDiff;

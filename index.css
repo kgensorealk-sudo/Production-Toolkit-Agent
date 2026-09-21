@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900 antialiased;
+  }
+}
+
+@layer components {
+  .architect-border {
+    @apply border border-slate-200;
+  }
+  
+  .architect-grid {
+    @apply bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:20px_20px];
+  }
+
+  .architect-button {
+    @apply px-4 py-2 text-[10px] font-bold uppercase tracking-widest transition-all border border-slate-200 bg-white hover:bg-slate-900 hover:text-white disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-400;
+  }
+
+  .architect-tab {
+    @apply flex items-center gap-3 px-6 py-4 text-[10px] font-bold uppercase tracking-widest transition-all border-r border-slate-200 whitespace-nowrap;
+  }
+
+  .custom-scrollbar-emerald::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar-emerald::-webkit-scrollbar-track {
+    @apply bg-slate-50;
+  }
+  .custom-scrollbar-emerald::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full border-2 border-slate-50 hover:bg-slate-400 transition-colors;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out forwards;
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* MathML mathvariant styling - ONLY mi tags */
+math mi, mi, mml\:mi {
+  font-style: italic !important;
+}
+
+math mi[mathvariant="italic"], mi[mathvariant="italic"], mml\:mi[mathvariant="italic"] {
+  font-style: italic !important;
+  font-variant: normal !important;
+}
+
+math mi[mathvariant="normal"], mi[mathvariant="normal"], mml\:mi[mathvariant="normal"] {
+  font-style: normal !important;
+  font-variant: normal !important;
+}
+
+

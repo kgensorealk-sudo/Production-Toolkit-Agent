@@ -1,0 +1,337 @@
+/**
+ * Grant Sponsor & Grant Number Extractor Utility
+ * Provides system prompt, AI output sanitizer, and robust offline rule-based fallback.
+ */
+
+export const GRANT_EXTRACTION_SYSTEM_PROMPT = `You are given an acknowledgement or funding statement. Task: Identify only the grant sponsor(s) and corresponding grant number(s) explicitly mentioned in the text.
+
+Rules:
+- Do not rewrite, paraphrase, or correct the original wording. Preserve the exact institution names and capitalization as presented.
+- Identify only explicit funding bodies (the official organization that awarded or administered the grant).
+- Do NOT capture program names, project titles, funding schemes, fellowship names, ethics codes, or internal administrative references as sponsors unless they are clearly presented as the funding institution itself.
+- The parent-organization rule applies ONLY when the text explicitly states an administrative relationship between two separately-named entities — e.g. "Program X, administered by University Y" or "funded by University Y through its Z Program." In that case only, capture the parent organization (University Y) as the sponsor.
+- Do NOT apply the parent-organization rule merely because an institution's name appears as a prefix within a longer program title (e.g. "Shanghai Dianji University Excellent Engineer Program" is one single, specific program name — not "a program administered by Shanghai Dianji University." Capture the full name exactly as written; do not truncate it down to just the institution.)
+- Each distinct funding source, program, or project named in the text is its own separate entry — even if two or more entries share a common institution name or prefix. Never merge, generalize, or collapse multiple distinctly-named programs into a single combined sponsor. The number of Grant Sponsor entries in your output must equal the number of distinct funding sources named in the input.
+- If multiple sponsors are present, list them separately.
+- If a sponsor has multiple grant numbers, list them on the same line separated by commas. Only include numbers/codes that are genuinely grant or award identifiers — never include a project title, team name, or descriptive phrase as if it were a grant number, even if it appears in the same parenthetical as a real grant number.
+- Each grant number belongs ONLY to the sponsor it is stated with. Never carry a number over to a sponsor that has none of its own, and never assign the same number to more than one sponsor unless the text explicitly says it funded both.
+- Keep each organization's full name intact as written. Do not split a single name at internal words (e.g. "Japan Society for the Promotion of Science" is ONE sponsor, not "Japan Society" plus "Promotion of Science"), and do not merge two sponsors listed together (e.g. "the Leverhulme Trust and the Royal Society" is TWO separate sponsors).
+- The identifier may be introduced by a label other than "grant number" — e.g. "award ID," "project ID," "project number," "contract number," "reference number," "sub-award," or "sub-grant" all serve the same purpose and must be captured as the Grant Number. This is different from a project TITLE (a descriptive name, which is never captured) — a project ID/number is a short alphanumeric code, not a description.
+- A sub-award or sub-grant number belongs on the SAME sponsor's Grant Number line as any other number already stated for that sponsor (comma-separated) — it is an additional identifier for the same funding relationship, not a new sponsor and not a separate field.
+- If no grant number is stated for a given sponsor, write: No grant number provided
+- Do not infer, assume, or generate missing information. Ignore disclaimers and non-funding statements. If the text states that no specific funding was received, return no sponsors at all.
+
+Before writing your final answer, verify each sponsor–number pairing you are about to give, in a few brief lines:
+1. Is this number stated explicitly for this specific sponsor — not just physically nearby in the text, and not borrowed from a different sponsor mentioned elsewhere in the passage?
+2. If you are about to give the SAME number to more than one sponsor, does the text explicitly say the funding is joint, shared, or co-funded? If it does not say that, each sponsor must get only its own stated number (or "No grant number provided" if it has none).
+3. Is each organization's full name kept intact — not split into two entries at an internal word, and not merged with a different organization that happens to be listed nearby?
+Keep this check short. After it, give your final answer using ONLY the exact format below, with no other text following it.
+
+Output Format (strictly follow):
+Grant Sponsor:
+Grant Number:`;
+
+export interface ExtractedGrantPair {
+  sponsor: string;
+  numbers: string[];
+}
+
+/**
+ * Checks a set of extracted sponsor/number pairs for a number shared across more
+ * than one sponsor. This can be entirely legitimate (a genuine joint/shared grant —
+ * see the joint-attribution pass in extractGrantsOffline), but since it's also
+ * exactly the shape of a real extraction mistake, the UI should always surface it
+ * for the user to visually confirm rather than silently accept either way.
+ * Returns null when nothing is shared.
+ */
+export function getSharedNumberWarning(pairs: ExtractedGrantPair[]): string | null {
+  const numberToSponsors = new Map<string, { display: string; sponsors: string[] }>();
+
+  for (const p of pairs) {
+    for (const n of p.numbers) {
+      if (!n || n === 'No grant number provided') continue;
+      const key = n.toLowerCase();
+      const entry = numberToSponsors.get(key);
+      if (entry) {
+        if (!entry.sponsors.includes(p.sponsor)) entry.sponsors.push(p.sponsor);
+      } else {
+        numberToSponsors.set(key, { display: n, sponsors: [p.sponsor] });
+      }
+    }
+  }
+
+  const shared = [...numberToSponsors.values()].filter((e) => e.sponsors.length > 1);
+  if (shared.length === 0) return null;
+
+  const details = shared
+    .map((e) => `"${e.display}" (${e.sponsors.join(' & ')})`)
+    .join('; ');
+  return `Heads up: ${details} — the same number appears under more than one sponsor. This is correct for a genuine joint/shared grant, but please double-check it's not a mistake.`;
+}
+
+/**
+ * Sanitizes and parses the raw text from the AI or offline engine
+ * into the strict format expected by the Grant Tagger:
+ *
+ * Grant Sponsor: <Name>
+ * Grant Number: <Num1, Num2>
+ */
+export function sanitizeGrantExtractionResult(rawText: string): {
+  formattedText: string;
+  pairs: ExtractedGrantPair[];
+} {
+  if (!rawText || !rawText.trim()) {
+    return { formattedText: '', pairs: [] };
+  }
+
+  // Remove markdown code fences if model wrapped response in ```
+  const cleanedText = rawText
+    .replace(/```[a-z]*\s*/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  // Split by "Grant Sponsor:" to parse individual sponsor blocks
+  const blocks = cleanedText.split(/(?:^|\n)(?=Grant Sponsor:)/i).filter((b) => b.trim());
+  const pairs: ExtractedGrantPair[] = [];
+
+  for (const block of blocks) {
+    const sponsorMatch = block.match(/Grant Sponsor:\s*([^\n]+)/i);
+    const numberMatch = block.match(/Grant Number:\s*([^\n]+)/i);
+
+    if (sponsorMatch) {
+      const sponsor = sponsorMatch[1].trim().replace(/^[:\s-]+/, '').replace(/[.;]+$/, '');
+      if (sponsor) {
+        let numberStr = numberMatch ? numberMatch[1].trim() : 'No grant number provided';
+        if (!numberStr || /^(?:none|n\/a|not (?:stated|provided|specified))\b/i.test(numberStr)) {
+          numberStr = 'No grant number provided';
+        }
+
+        const isNoNumber = /no grant number provided/i.test(numberStr);
+        const numbers = isNoNumber
+          ? []
+          : numberStr
+              .split(/[,;]|\band\b/i)
+              .map((n) => n.trim().replace(/^[:#\s-]+/, '').replace(/[.;]+$/, ''))
+              .filter(Boolean);
+
+        pairs.push({
+          sponsor,
+          numbers: isNoNumber ? ['No grant number provided'] : numbers,
+        });
+      }
+    }
+  }
+
+  // Construct standardized output text with double newline separation
+  const formattedText = pairs
+    .map((p) => {
+      const numLine = p.numbers.length > 0 ? p.numbers.join(', ') : 'No grant number provided';
+      return `Grant Sponsor: ${p.sponsor}\nGrant Number: ${numLine}`;
+    })
+    .join('\n\n');
+
+  return { formattedText, pairs };
+}
+
+/**
+ * Robust offline rule-based fallback for identifying grant sponsors & numbers
+ * when network is unreachable, offline mode is engaged, or no API key is provided.
+ */
+export function extractGrantsOffline(statement: string): {
+  formattedText: string;
+  pairs: ExtractedGrantPair[];
+} {
+  if (!statement || !statement.trim()) {
+    return { formattedText: '', pairs: [] };
+  }
+
+  const text = statement.trim();
+  const pairs: ExtractedGrantPair[] = [];
+
+  // Known abbreviations or standalone acronyms of funding bodies
+  const standaloneAcronyms = ['NIH', 'NSF', 'ERC', 'DFG', 'UKRI', 'MRC', 'EPSRC', 'BBSRC', 'HHMI', 'CIHR', 'NSERC', 'JSPS', 'NNSFC', 'NASA', 'DOE', 'DOD', 'NOAA', 'EPA', 'FDA', 'CDC', 'USDA'];
+  const acronymPattern = new RegExp(`\\b(?:${standaloneAcronyms.join('|')})\\b`, 'g');
+
+  // Proper noun sequence regex: capitalized words linked by lowercase connectors.
+  // Two connector classes, deliberately different:
+  //  - of/for/in/the/de/... chain freely, so "Japan Society *for the* Promotion of Science"
+  //    stays one name instead of splitting into two phantom sponsors.
+  //  - "and"/"&" only link when followed IMMEDIATELY by a capitalized word. This keeps
+  //    "Ministry of Science and Technology" whole while still splitting a list like
+  //    "Leverhulme Trust *and the* Royal Society" into two separate sponsors.
+  const properNounPattern = /\b[A-Z][A-Za-z0-9]*(?:(?:\s+(?:of|for|in|the|de|des|du|der|von)){1,3}\s+[A-Z][A-Za-z0-9]+|\s+(?:and|&)\s+[A-Z][A-Za-z0-9]+|\s+[A-Z][A-Za-z0-9]+)+\b/g;
+  const orgWordPattern = /(?:Foundation|Institutes?|Council|Agency|Trust|Society|Department|Ministry|Association|Organization|Fund|University|Commission|Center|Centre|Laboratory|Program|Academy|Board|Federation|Union|Initiative|Administration|Bureau|Authority|Survey|Health|Science|Research)\b/i;
+  const leadingNoise = /^(?:This|The|Authors?|Study|Work|Research|Financial|Acknowledgement|Funding|Also|Additionally|Furthermore|In|At|By|From|For|We|With|Grant|Grants)\s+/i;
+
+  const foundCandidates: Array<{ name: string; index: number; length: number }> = [];
+
+  // Ranges covered by parentheses — these hold project titles, team names, and
+  // descriptive sub-titles, not funding bodies. A capitalized phrase scraped from
+  // inside one (e.g. "...Collaborative Education Mechanism for Digital Health")
+  // would otherwise be emitted as a phantom extra sponsor.
+  const parentheticalRanges: Array<[number, number]> = [];
+  for (const m of text.matchAll(/\([^()]*\)/g)) {
+    parentheticalRanges.push([m.index, m.index + m[0].length]);
+  }
+  const isInsideParenthetical = (idx: number) =>
+    parentheticalRanges.some(([start, end]) => idx > start && idx < end);
+
+  // Match proper noun phrases
+  for (const m of text.matchAll(properNounPattern)) {
+    const raw = m[0];
+    const cleaned = raw.replace(leadingNoise, '').trim();
+    if (cleaned.length >= 3 && orgWordPattern.test(cleaned)) {
+      const offset = m.index + (raw.length - cleaned.length);
+      if (isInsideParenthetical(offset)) continue;
+      foundCandidates.push({ name: cleaned, index: offset, length: cleaned.length });
+    }
+  }
+
+  // Match standalone acronyms
+  for (const m of text.matchAll(acronymPattern)) {
+    const acronym = m[0];
+    const index = m.index;
+    if (isInsideParenthetical(index)) continue;
+    if (!foundCandidates.some(c => index >= c.index && index < c.index + c.length)) {
+      foundCandidates.push({ name: acronym, index, length: acronym.length });
+    }
+  }
+
+  // Sort by appearance in text
+  foundCandidates.sort((a, b) => a.index - b.index);
+
+  const pairCandidates: Array<{ name: string; index: number; length: number }> = [];
+
+  for (let ci = 0; ci < foundCandidates.length; ci++) {
+    const candidate = foundCandidates[ci];
+    // Avoid duplicates
+    if (pairs.some(p => p.sponsor.toLowerCase() === candidate.name.toLowerCase())) {
+      continue;
+    }
+
+    // Search for grant numbers after this sponsor, but STOP at the next sponsor.
+    // Without this bound, a sponsor whose own code isn't recognised silently grabs the
+    // NEXT sponsor's number instead — e.g. "...Foundation of China (No. 82071234) and
+    // the ...Foundation of Jiangsu Province (BK20201234)" assigned BK20201234 to both.
+    const searchStart = candidate.index + candidate.length;
+    const nextCandidateIndex = ci + 1 < foundCandidates.length ? foundCandidates[ci + 1].index : text.length;
+    const afterSlice = text.slice(searchStart, Math.min(searchStart + 150, nextCandidateIndex));
+
+    const codeToken = '[A-Za-z0-9][A-Za-z0-9\\/\\-_.]*[0-9][A-Za-z0-9\\/\\-_.]*';
+    const codeList = `${codeToken}(?:\\s*,?\\s*(?:and\\s+)?${codeToken})*`;
+
+    const grantNumMatch =
+      // Keyword-introduced code(s): "grant no. X", "award numbers X and Y", "grant agreement No 874662".
+      afterSlice.match(new RegExp(`(?:grant|award|project|contract|agreement)s?(?:\\s+(?:agreement|numbers?|nos?\\.?|codes?|id))?\\s*[:#]?\\s*(${codeList})`, 'i')) ||
+      // "No."/"Number" lead-in without the word "grant", common inside parentheses: "(No. 82071234)".
+      afterSlice.match(new RegExp(`\\b(?:nos?\\.?|numbers?)\\s*[:#]?\\s*(${codeList})`, 'i')) ||
+      afterSlice.match(/\[([A-Za-z0-9\/\-_.\s]+)\]/) ||
+      // Bare identifier code inside a parenthetical, e.g. "(Long Project Title, C2026151)".
+      // Requires a digit and no spaces so real codes match but prose/titles never do.
+      afterSlice.match(/\(([^()]*?,\s*)?([A-Za-z]{0,6}[0-9][A-Za-z0-9\/\-_.]*)\s*\)/);
+
+    let numbers: string[] = [];
+    if (grantNumMatch) {
+      // The bare-parenthetical pattern captures its code in group 2; the others use group 1.
+      const rawNums = (grantNumMatch[2] || grantNumMatch[1] || '').trim();
+      if (rawNums && !/^(?:and|the|for|this|grant|none|no)\b/i.test(rawNums)) {
+        numbers = rawNums
+          .split(/[,;]|\band\b/i)
+          .map((n) => n.trim().replace(/^[:#\s-]+/, '').replace(/[.;]+$/, ''))
+          .filter((n) => n.length >= 2 && !/^(?:and|the|grant|no|none|numbers?|award)$/i.test(n));
+      }
+    }
+
+    // Sub-awards/sub-grants are a differently-labeled second identifier, not just another
+    // item in the primary grant-number list — e.g. "(Joint Core Facility Grant: X; institutional
+    // sub-award Y)". The primary pattern above stops at the semicolon on purpose (it shouldn't
+    // blindly swallow anything after one), so this looks for the sub-award keyword specifically.
+    const subAwardMatch = afterSlice.match(new RegExp(`sub[- ]?(?:award|grant)s?\\s*[:#]?\\s*(${codeList})`, 'i'));
+    if (subAwardMatch && subAwardMatch[1]) {
+      const subNums = subAwardMatch[1]
+        .split(/[,;]|\band\b/i)
+        .map((n) => n.trim().replace(/^[:#\s-]+/, '').replace(/[.;]+$/, ''))
+        .filter((n) => n.length >= 2 && !/^(?:and|the|grant|no|none|numbers?|award)$/i.test(n));
+      for (const n of subNums) {
+        if (!numbers.includes(n)) numbers.push(n);
+      }
+    }
+
+    // Fallback: the number may precede the sponsor — "Grant 2021YFA123 from the Ministry of ...".
+    // Only a short backward window, and only when introduced by a grant keyword, so unrelated
+    // digits earlier in the sentence can't be mistaken for this sponsor's award code.
+    if (numbers.length === 0) {
+      const beforeSlice = text.slice(Math.max(0, candidate.index - 80), candidate.index);
+      const beforeMatch = beforeSlice.match(
+        new RegExp(`(?:grant|award|contract|agreement)s?(?:\\s+(?:numbers?|nos?\\.?|codes?|id))?\\s*[:#]?\\s*(${codeList})\\s+(?:from|by|of|awarded by)\\s+(?:the\\s+)?$`, 'i')
+      );
+      if (beforeMatch && beforeMatch[1]) {
+        numbers = beforeMatch[1]
+          .split(/[,;]|\band\b/i)
+          .map((n) => n.trim().replace(/^[:#\s-]+/, '').replace(/[.;]+$/, ''))
+          .filter((n) => n.length >= 2 && !/^(?:and|the|grant|no|none|numbers?|award)$/i.test(n));
+      }
+    }
+
+    pairs.push({
+      sponsor: candidate.name,
+      numbers: numbers.length > 0 ? numbers : ['No grant number provided'],
+    });
+    pairCandidates.push(candidate);
+  }
+
+  // Joint-attribution pass: "provided JOINTLY by A and B (Grant: X)" states one number
+  // for both sponsors, but the per-sponsor search above deliberately stops at the next
+  // sponsor's name (that boundary is what stops an UNRELATED sequential sponsor from
+  // stealing another's distinct number — see the China/Jiangsu case). So a sponsor with
+  // nothing but a bare "and"/"," between it and the next name never gets a chance to see
+  // a number that appears only after the LAST name in the list.
+  //
+  // This only fires when BOTH are true, specifically to avoid reopening that same bug:
+  //   1. The gap to the next sponsor is bare (just a conjunction, nothing else) — real,
+  //      independent per-sponsor numbers always break this, since each sponsor's own
+  //      figure or parenthetical sits in that gap.
+  //   2. An explicit joint-funding word ("jointly", "joint", "co-funded", "collaboratively")
+  //      appears shortly before this sponsor — the text has to actually say the funding
+  //      is shared, not just that two sponsors happen to be listed near each other.
+  const jointSignalPattern = /\b(?:jointly|joint|co-funded|cofunded|collaboratively|in collaboration)\b/i;
+
+  // A gap counts as "bare" if, after stripping the sponsor's own acronym restatement
+  // (e.g. "(NOAA)"), filler words ("and", "the"), and punctuation/whitespace, nothing
+  // is left. Anything else remaining — a number, a second sponsor's own parenthetical,
+  // real prose — means this is NOT just two names listed together, so no sharing.
+  const isBareGap = (gapText: string): boolean => {
+    const stripped = gapText
+      .replace(/\([A-Z]{2,10}\)/g, ' ')
+      .replace(/\b(?:and|the)\b/gi, ' ')
+      .replace(/[\s,;&]+/g, '');
+    return stripped.length === 0;
+  };
+
+  for (let i = pairs.length - 2; i >= 0; i--) {
+    const current = pairs[i];
+    const isPlaceholder = current.numbers.length === 1 && current.numbers[0] === 'No grant number provided';
+    if (!isPlaceholder) continue;
+
+    const next = pairs[i + 1];
+    const nextHasRealNumber = !(next.numbers.length === 1 && next.numbers[0] === 'No grant number provided');
+    if (!nextHasRealNumber) continue;
+
+    const gapText = text.slice(pairCandidates[i].index + pairCandidates[i].length, pairCandidates[i + 1].index);
+    if (!isBareGap(gapText)) continue;
+
+    const precedingText = text.slice(Math.max(0, pairCandidates[i].index - 100), pairCandidates[i].index);
+    if (!jointSignalPattern.test(precedingText)) continue;
+
+    current.numbers = [...next.numbers];
+  }
+
+  const formattedText = pairs
+    .map((p) => {
+      const numLine = p.numbers.length > 0 ? p.numbers.join(', ') : 'No grant number provided';
+      return `Grant Sponsor: ${p.sponsor}\nGrant Number: ${numLine}`;
+    })
+    .join('\n\n');
+
+  return { formattedText, pairs };
+}

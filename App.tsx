@@ -1,0 +1,188 @@
+import React, { useState, useEffect } from 'react';
+import { HashRouter } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router';
+import Layout from './components/Layout';
+import Landing from './pages/Landing';
+import Dashboard from './pages/Dashboard';
+import XmlRenumber from './pages/XmlRenumber';
+import XmlRenumberExperimental from './pages/XmlRenumberExperimental';
+import CreditGenerator from './pages/CreditGenerator';
+import QuickDiff from './pages/QuickDiff';
+import TagCleaner from './pages/TagCleaner';
+import TableFixer from './pages/TableFixer';
+import TableBeautifier from './pages/TableBeautifier';
+import ArticleHighlights from './pages/ArticleHighlights';
+import ViewSync from './pages/ViewSync';
+import ReferenceUpdater from './pages/ReferenceUpdater';
+import ReferenceDupeChecker from './pages/ReferenceDupeChecker';
+import UncitedRefCleaner from './pages/UncitedRefCleaner';
+import OtherRefScanner from './pages/OtherRefScanner';
+import ReferenceExtractor from './pages/ReferenceExtractor';
+import GrantTagger from './pages/GrantTagger';
+import IdAuditor from './pages/IdAuditor';
+import CommentReplacer from './pages/CommentReplacer';
+import CitationLinker from './pages/CitationLinker';
+import CitationLinkerExperimental from './pages/CitationLinkerExperimental';
+import FormulaEditorExperimental from './pages/FormulaEditorExperimental';
+import SectionAuditor from './pages/SectionAuditor';
+import AffiliationSequencer from './pages/AffiliationSequencer';
+import StructuralNodeArchitect from './pages/StructuralNodeArchitect';
+import RefSorter from './pages/RefSorter';
+import WordToXml from './pages/WordToXml';
+import ReferenceTaggerExperimental from './pages/ReferenceTaggerExperimental';
+import Docs from './pages/Docs';
+import Login from './pages/Login';
+import AdminDashboard from './pages/AdminDashboard';
+import Experimental from './pages/Experimental';
+import UserSettings from './pages/UserSettings';
+import Terms from './pages/Terms';
+import AuthModal from './components/AuthModal';
+import InactivityTracker from './components/InactivityTracker';
+import { ToolId } from './types';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SettingsProvider } from './contexts/SettingsContext';
+import LoadingOverlay from './components/LoadingOverlay';
+import ErrorBoundary from './components/ErrorBoundary';
+import { useToolMetrics } from './services/usageMetricsService';
+
+/**
+ * NODE ACCESS CONTROLLER
+ * Hardened to prevent unauthorized DOM access.
+ */
+const NodeAccessController: React.FC<{ 
+    children: React.ReactElement, 
+    toolId: ToolId, 
+    displayName: string,
+    mode: 'key-allowed' | 'subscription-only' | 'key-exclusive'
+}> = ({ children, toolId, displayName, mode }) => {
+    const { profile, freeTools, isAdmin } = useAuth();
+    const navigate = useNavigate();
+
+    const isFree = freeTools.includes(toolId);
+    const isSubscribed = mode !== 'key-exclusive' && profile?.is_subscribed;
+    const isUnlockedViaKey = (mode === 'key-allowed' || mode === 'key-exclusive') && 
+        (profile?.unlocked_tools?.includes(toolId) || profile?.unlocked_tools?.includes('universal'));
+
+    const hasAccess = isAdmin || isFree || isSubscribed || isUnlockedViaKey;
+
+    // Only count this as tool usage once access is actually granted — this is the
+    // one branch below that renders the real tool (`return children`). Passing
+    // undefined when access is denied makes useToolMetrics's own effect no-op/clean
+    // up, so someone sitting on the paywall or key-gate screen below never logs as
+    // having used the tool at all.
+    useToolMetrics(hasAccess ? toolId : undefined);
+
+    if (hasAccess) return children;
+
+    if (mode === 'key-allowed' || mode === 'key-exclusive') {
+        return (
+            <div className="relative h-full w-full overflow-hidden flex items-center justify-center bg-slate-50">
+                <div className="absolute inset-0 bg-slate-100 opacity-50 pointer-events-none" />
+                <AuthModal toolId={toolId} toolDisplayName={displayName} onSuccess={() => {}} />
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative h-full w-full overflow-hidden bg-slate-100 flex items-center justify-center">
+            <div className="bg-white p-12 rounded-[3rem] shadow-2xl max-md w-full border border-slate-200 text-center animate-scale-in relative ring-8 ring-slate-900/5">
+                <div className="mb-8">
+                    <div className="w-24 h-24 bg-amber-50 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-sm border border-amber-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Access Restricted</h2>
+                    <p className="text-slate-500 mt-4 text-sm font-medium leading-relaxed">
+                        The <b>{displayName}</b> module requires a validated Enterprise Subscription.
+                    </p>
+                </div>
+                <button 
+                    onClick={() => navigate('/dashboard')} 
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-2xl shadow-xl transition-all active:scale-95 uppercase tracking-widest text-xs"
+                >
+                    Return to Workspace
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const { session, loading } = useAuth();
+    if (loading) return <LoadingOverlay message="Validating Session..." color="indigo" />;
+    if (!session) return <Navigate to="/login" replace />;
+    return (
+        <>
+            {children}
+        </>
+    );
+};
+
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const { session, isAdmin, loading } = useAuth();
+    if (loading) return <LoadingOverlay message="Checking Authority..." color="slate" />;
+    if (!session || !isAdmin) return <Navigate to="/" replace />;
+    return (
+        <>
+            {children}
+        </>
+    );
+};
+
+const App: React.FC = () => {
+    return (
+        <ErrorBoundary>
+            <SettingsProvider>
+                <AuthProvider>
+                    <InactivityTracker>
+                        <HashRouter>
+                            <Routes>
+                                <Route path="/login" element={<Login />} />
+                                <Route path="/terms" element={<Terms />} />
+                                <Route path="/" element={<ProtectedRoute><Layout isLanding={true}><Landing /></Layout></ProtectedRoute>} />
+                                <Route path="/admin" element={<AdminRoute><Layout><AdminDashboard /></Layout></AdminRoute>} />
+                                <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
+                                <Route path="/experimental" element={<ProtectedRoute><Layout currentTool={'experimental' as any}><Experimental /></Layout></ProtectedRoute>} />
+                                <Route path="/docs" element={<ProtectedRoute><Layout><Docs /></Layout></ProtectedRoute>} />
+                                <Route path="/settings" element={<ProtectedRoute><Layout><UserSettings /></Layout></ProtectedRoute>} />
+                                
+                                <Route path="/tableBeautifier" element={<ProtectedRoute><Layout currentTool={ToolId.TABLE_BEAUTIFIER}><NodeAccessController toolId={ToolId.TABLE_BEAUTIFIER} displayName="Table XML Beautifier" mode="key-exclusive"><TableBeautifier /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/xmlRenumber" element={<ProtectedRoute><Layout currentTool={ToolId.XML_RENUMBER}><NodeAccessController toolId={ToolId.XML_RENUMBER} displayName="XML Normalizer" mode="key-allowed"><XmlRenumber /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/xmlRenumberExp" element={<ProtectedRoute><Layout currentTool={ToolId.XML_RENUMBER_EXP}><NodeAccessController toolId={ToolId.XML_RENUMBER_EXP} displayName="XML Normalizer Pro (Experimental)" mode="key-allowed"><XmlRenumberExperimental /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/creditGenerator" element={<ProtectedRoute><Layout currentTool={ToolId.CREDIT_GENERATOR}><NodeAccessController toolId={ToolId.CREDIT_GENERATOR} displayName="CRediT Tagging" mode="key-allowed"><CreditGenerator /></NodeAccessController></Layout></ProtectedRoute>} />
+                                
+                                <Route path="/uncitedCleaner" element={<ProtectedRoute><Layout currentTool={ToolId.UNCITED_CLEANER}><NodeAccessController toolId={ToolId.UNCITED_CLEANER} displayName="Uncited Ref Cleaner" mode="subscription-only"><UncitedRefCleaner /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/otherRefScanner" element={<ProtectedRoute><Layout currentTool={ToolId.OTHER_REF_SCANNER}><NodeAccessController toolId={ToolId.OTHER_REF_SCANNER} displayName="Other-Ref Scanner" mode="subscription-only"><OtherRefScanner /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/quickDiff" element={<ProtectedRoute><Layout currentTool={ToolId.QUICK_DIFF}><NodeAccessController toolId={ToolId.QUICK_DIFF} displayName="Quick Text Diff" mode="subscription-only"><QuickDiff /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/tagCleaner" element={<ProtectedRoute><Layout currentTool={ToolId.TAG_CLEANER}><NodeAccessController toolId={ToolId.TAG_CLEANER} displayName="XML Tag Cleaner" mode="subscription-only"><TagCleaner /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/tableFixer" element={<ProtectedRoute><Layout currentTool={ToolId.TABLE_FIXER}><NodeAccessController toolId={ToolId.TABLE_FIXER} displayName="XML Table Fixer" mode="subscription-only"><TableFixer /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/highlightsGen" element={<ProtectedRoute><Layout currentTool={ToolId.HIGHLIGHTS_GEN}><NodeAccessController toolId={ToolId.HIGHLIGHTS_GEN} displayName="Article Highlights Gen" mode="subscription-only"><ArticleHighlights /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/viewSync" element={<ProtectedRoute><Layout currentTool={ToolId.VIEW_SYNC}><NodeAccessController toolId={ToolId.VIEW_SYNC} displayName="View Synchronizer" mode="subscription-only"><ViewSync /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/referenceGen" element={<ProtectedRoute><Layout currentTool={ToolId.REFERENCE_GEN}><NodeAccessController toolId={ToolId.REFERENCE_GEN} displayName="Reference Updater" mode="subscription-only"><ReferenceUpdater /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/refDupeCheck" element={<ProtectedRoute><Layout currentTool={ToolId.REF_DUPE_CHECK}><NodeAccessController toolId={ToolId.REF_DUPE_CHECK} displayName="Duplicate Ref Remover" mode="subscription-only"><ReferenceDupeChecker /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/refExtractor" element={<ProtectedRoute><Layout currentTool={ToolId.REF_EXTRACTOR}><NodeAccessController toolId={ToolId.REF_EXTRACTOR} displayName="Bibliography Extractor" mode="subscription-only"><ReferenceExtractor /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/grantTagger" element={<ProtectedRoute><Layout currentTool={ToolId.GRANT_TAGGER}><NodeAccessController toolId={ToolId.GRANT_TAGGER} displayName="Grant Tagger" mode="subscription-only"><GrantTagger /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/idAuditor" element={<ProtectedRoute><Layout currentTool={ToolId.ID_AUDITOR}><NodeAccessController toolId={ToolId.ID_AUDITOR} displayName="ID Prefix Auditor" mode="subscription-only"><IdAuditor /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/commentReplacer" element={<ProtectedRoute><Layout currentTool={ToolId.COMMENT_REPLACER}><NodeAccessController toolId={ToolId.COMMENT_REPLACER} displayName="Comment Replacer" mode="subscription-only"><CommentReplacer /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/citationLinker" element={<ProtectedRoute><Layout currentTool={ToolId.CITATION_LINKER}><NodeAccessController toolId={ToolId.CITATION_LINKER} displayName="Citation Linker Pro" mode="key-exclusive"><CitationLinker /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/citationLinkerExp" element={<ProtectedRoute><Layout currentTool={ToolId.CITATION_LINKER_EXP}><NodeAccessController toolId={ToolId.CITATION_LINKER_EXP} displayName="Citation Linker Pro MAX" mode="key-exclusive"><CitationLinkerExperimental /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/formulaEditorExp" element={<ProtectedRoute><Layout currentTool={ToolId.FORMULA_EDITOR_EXP}><NodeAccessController toolId={ToolId.FORMULA_EDITOR_EXP} displayName="Formula Studio Pro (Experimental)" mode="key-allowed"><FormulaEditorExperimental /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/sectionAuditor" element={<ProtectedRoute><Layout currentTool={ToolId.SECTION_AUDITOR}><NodeAccessController toolId={ToolId.SECTION_AUDITOR} displayName="Section Auditor" mode="subscription-only"><SectionAuditor /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/affiliationSequencer" element={<ProtectedRoute><Layout currentTool={ToolId.AFFILIATION_SEQUENCER}><NodeAccessController toolId={ToolId.AFFILIATION_SEQUENCER} displayName="Affiliation Sequencer" mode="subscription-only"><AffiliationSequencer /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/affiliationIdSequencer" element={<ProtectedRoute><Layout currentTool={ToolId.AFFILIATION_SEQUENCER}><NodeAccessController toolId={ToolId.AFFILIATION_SEQUENCER} displayName="Affiliation Sequencer" mode="subscription-only"><AffiliationSequencer /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/affiliation-id-normalizer" element={<ProtectedRoute><Layout currentTool={ToolId.AFFILIATION_SEQUENCER}><NodeAccessController toolId={ToolId.AFFILIATION_SEQUENCER} displayName="Affiliation Sequencer" mode="subscription-only"><AffiliationSequencer /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/structuralArchitect" element={<ProtectedRoute><Layout currentTool={ToolId.STRUCTURAL_ARCHITECT}><NodeAccessController toolId={ToolId.STRUCTURAL_ARCHITECT} displayName="Reference Structure Repair" mode="subscription-only"><StructuralNodeArchitect /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/refSorter" element={<ProtectedRoute><Layout currentTool={ToolId.REF_SORTER}><NodeAccessController toolId={ToolId.REF_SORTER} displayName="Reference Sorter" mode="subscription-only"><RefSorter /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/wordToXml" element={<ProtectedRoute><Layout currentTool={ToolId.WORD_TO_XML}><NodeAccessController toolId={ToolId.WORD_TO_XML} displayName="MS Word to XML" mode="key-allowed"><WordToXml /></NodeAccessController></Layout></ProtectedRoute>} />
+                                <Route path="/refTaggerExp" element={<ProtectedRoute><Layout currentTool={ToolId.REF_TAGGER_EXP}><NodeAccessController toolId={ToolId.REF_TAGGER_EXP} displayName="Reference XML Tagger Pro (Experimental)" mode="key-allowed"><ReferenceTaggerExperimental /></NodeAccessController></Layout></ProtectedRoute>} />
+                            </Routes>
+                        </HashRouter>
+                    </InactivityTracker>
+                </AuthProvider>
+            </SettingsProvider>
+        </ErrorBoundary>
+    );
+};
+
+export default App;
