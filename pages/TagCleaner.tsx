@@ -7,13 +7,8 @@ import Toast from '../components/Toast';
 import LoadingOverlay from '../components/LoadingOverlay';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import useLocalStorage from '../hooks/useLocalStorage';
+import { cleanXmlTags, XmlTagReportItem } from '../services/xml/xmlTagCleaner';
 
-interface ReportItem {
-    id: number;
-    type: 'Insertion' | 'Deletion' | 'Comment';
-    content: string;
-    action: 'Kept' | 'Removed' | 'Restored';
-}
 
 const escapeHtml = (unsafe: string) => unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -59,7 +54,7 @@ const TagCleaner: React.FC = () => {
     const [input, setInput] = useLocalStorage<string>('tag_cleaner_input', '');
     const [output, setOutput] = useLocalStorage<string>('tag_cleaner_output', '');
     const [lastProcessedInput, setLastProcessedInput] = useLocalStorage<string>('tag_cleaner_last_input', '');
-    const [reportData, setReportData] = useState<ReportItem[]>([]);
+    const [reportData, setReportData] = useState<XmlTagReportItem[]>([]);
     const [activeTab, setActiveTab] = useState<'output' | 'report' | 'diff'>('output');
     const [toast, setToast] = useState<{msg: string, type: 'success'|'warn'|'error'} | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -207,83 +202,34 @@ const TagCleaner: React.FC = () => {
     }, [activeTab, input, output, generateDiff]);
 
     const processTags = (action: 'accept' | 'reject') => {
-        if (!input.trim()) {
-            setToast({ msg: "Please enter XML text to clean.", type: "warn" });
-            return;
+    if (!input.trim()) {
+        setToast({ msg: "Please enter XML text to clean.", type: "warn" });
+        return;
+    }
+
+    setIsLoading(true);
+
+    setTimeout(() => {
+        const result = cleanXmlTags(input, action);
+
+        setOutput(result.output);
+        setLastProcessedInput(input);
+        setReportData(result.report);
+        generateDiff(input, result.output);
+
+        if (result.report.length > 0) {
+            setToast({
+                msg: `Processed ${result.report.length} tags (${action === 'accept' ? 'Accepted' : 'Rejected'} All)`,
+                type: "success"
+            });
+            setActiveTab('report');
+        } else {
+            setToast({ msg: "No tags found to clean.", type: "warn" });
+            setActiveTab('output');
         }
-        setIsLoading(true);
-        setTimeout(() => {
-            let current = input;
-            const newReport: ReportItem[] = [];
-            let idCounter = 1;
 
-            const processPattern = (text: string, regex: RegExp, type: 'Insertion' | 'Deletion' | 'Comment', mode: 'accept' | 'reject') => {
-                return text.replace(regex, (match, content) => {
-                    let itemAction: 'Kept' | 'Removed' | 'Restored' = 'Kept';
-                    let replacement = match;
-
-                    if (type === 'Comment') {
-                        itemAction = 'Removed';
-                        replacement = '';
-                    } else if (type === 'Insertion') {
-                        if (mode === 'accept') { 
-                            itemAction = 'Kept'; 
-                            replacement = content; 
-                        } else { 
-                            itemAction = 'Removed'; 
-                            replacement = ''; 
-                        }
-                    } else if (type === 'Deletion') {
-                        if (mode === 'accept') { 
-                            itemAction = 'Removed'; 
-                            replacement = ''; 
-                        } else { 
-                            itemAction = 'Restored'; 
-                            replacement = content; 
-                        }
-                    }
-
-                    newReport.push({
-                        id: idCounter++,
-                        type,
-                        content: content.trim(), 
-                        action: itemAction
-                    });
-                    return replacement;
-                });
-            };
-
-            // 1. Process Comments (Always remove)
-            current = processPattern(current, /<opt_comment(?:\s+[^>]*)?>([\s\S]*?)<\/opt_comment>/gi, 'Comment', action);
-            
-            // 2. Process Insertions
-            current = processPattern(current, /<opt_INS(?:\s+[^>]*)?>([\s\S]*?)<\/opt_INS>/gi, 'Insertion', action);
-
-            // 3. Process Deletions
-            current = processPattern(current, /<opt_DEL(?:\s+[^>]*)?>([\s\S]*?)<\/opt_DEL>/gi, 'Deletion', action);
-
-            // 4. Final cleanup of any orphaned/malformed tags that weren't caught in pairs
-            current = current.replace(/<\/?opt_(?:INS|DEL|comment)(?:\s+[^>]*)?>/gi, '');
-
-            setOutput(current);
-            setLastProcessedInput(input);
-            setReportData(newReport);
-            generateDiff(input, current);
-            
-            // If we have changes, show the report stats in toast, otherwise just success
-            if (newReport.length > 0) {
-                setToast({ 
-                    msg: `Processed ${newReport.length} tags (${action === 'accept' ? 'Accepted' : 'Rejected'} All)`, 
-                    type: "success" 
-                });
-                setActiveTab('report');
-            } else {
-                setToast({ msg: "No tags found to clean.", type: "warn" });
-                setActiveTab('output');
-            }
-            
-            setIsLoading(false);
-        }, 600);
+        setIsLoading(false);
+    }, 600);
     };
 
     const copyOutput = () => {

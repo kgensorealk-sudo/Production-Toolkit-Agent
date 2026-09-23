@@ -12,6 +12,7 @@ import {
   getOfflineFaqResponse,
 } from './keeperEngine.js';
 import { sequenceAffiliationIdsStrict } from './affiliationSequencerLogic.js';
+import { analyzeProductionIssue } from '../services/agents/productionQaAgent.js';
 
 export const config = {
   runtime: 'nodejs',
@@ -177,11 +178,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
     const userText = (lastUserMessage?.content || '').trim();
     const userTextLower = userText.toLowerCase();
-
     // Check if user is inquiring about the Affiliation Sequencer or trying to sequence affiliations in XML
     const isAffiliationSequencingTask = 
       (userTextLower.includes('affiliation') || userTextLower.includes('ce:affiliation') || userTextLower.includes('refid')) &&
-      (userTextLower.includes('increments of 5') || userTextLower.includes('af0005') || userTextLower.includes('af0010') || userTextLower.includes('sequence') || userTextLower.includes('sequential') || userTextLower.includes('correct the id') || userTextLower.includes('af0020') || userTextLower.includes('af0025'));
+      (userTextLower.includes('increments of 5') || userTextLower.includes('af0005') || userTextLower.includes('af0010') || userTextLower.includes('sequence') || userTextLower.includes('sequential') || userTextLower.includes('renumber') || userTextLower.includes('normalize') || userTextLower.includes('standardize') || userTextLower.includes('fix') || userTextLower.includes('correct the affiliation') || userTextLower.includes('correct the id') || userTextLower.includes('af0020') || userTextLower.includes('af0025'));
+
+    const isProductionQaTask =
+  userTextLower.includes('production qa') ||
+  userTextLower.includes('quality check') ||
+  userTextLower.includes('production issue') ||
+  userTextLower.includes('check this') ||
+  userTextLower.includes('review this') ||
+  userTextLower.includes('verify this') ||
+  userTextLower.includes('is this correct') ||
+  userTextLower.includes('are correct') ||
+  userTextLower.includes('does this match') ||
+  userTextLower.includes('author correction') ||
+  userTextLower.includes('reference') ||
+  userTextLower.includes('citation') ||
+  userTextLower.includes('uncited') ||
+  userTextLower.includes('jm query');
+
+  if (isProductionQaTask && !isAffiliationSequencingTask) {
+  const qaResult = analyzeProductionIssue({
+    input: userText,
+  });
+
+  return res.json({
+    reply: sanitizeOutput(
+      `### Production QA Assessment
+
+**Issue:** ${qaResult.issue}
+
+**Finding:** ${qaResult.finding}
+
+**Recommended Action:** ${qaResult.recommendedAction}
+
+**JM Query Required:** ${qaResult.jmQueryRequired ? 'Yes' : 'No'}`
+    ),
+    modelUsed: 'keeper-production-qa'
+  });
+}
 
     const isAffiliationToolInquiry = 
       (userTextLower.includes('affiliation') && (userTextLower.includes('tool') || userTextLower.includes('where') || userTextLower.includes('find') || userTextLower.includes('how') || userTextLower.includes('know'))) ||
@@ -237,6 +274,12 @@ I have updated the **Affiliation Sequencer** and Keeper's processing engine to a
 You can also paste the XML snippet or full article directly here in chat, and Keeper will return the fully synchronized XML.`),
           modelUsed: 'keeper-affiliation-sequencer'
         });
+      } else {
+        return res.json({ reply: sanitizeOutput(`### Affiliation Sequencer
+
+This is an execution request for the **Affiliation Sequencer**. Please provide the XML to sequence the affiliation IDs and synchronize the corresponding cross-reference links.
+
+**[Open Affiliation Sequencer](#/affiliationSequencer)`), modelUsed: 'keeper-affiliation-sequencer' });
       }
     }
 
@@ -394,3 +437,4 @@ The **Affiliation Sequencer** is available directly in the workspace:
     });
   }
 }
+

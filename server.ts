@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import chatHandler from './utils/chatHandler.js';
 import grantExtractHandler from './utils/grantExtractHandler.js';
+import productionQaHandler from './api/production-qa.js';
 
 async function startServer() {
   const app = express();
@@ -9,6 +10,7 @@ async function startServer() {
   const PORT = !isNaN(portFromEnv) ? portFromEnv : 3000;
 
   app.use(express.json({ limit: '10mb' }));
+
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
@@ -35,6 +37,9 @@ async function startServer() {
   app.post('/api/grant-extract', (req, res) => {
     grantExtractHandler(req as any, res as any);
   });
+  app.post('/api/production-qa', (req, res) => {
+  productionQaHandler(req as any, res as any);
+});
 
   // Vite middleware for development vs static build in production
   if (process.env.NODE_ENV !== 'production') {
@@ -52,6 +57,13 @@ async function startServer() {
     });
   }
 
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({ error: 'Invalid JSON request body.' });
+    }
+    next(err);
+  });
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Production Toolkit Server running on http://0.0.0.0:${PORT}`);
   });
@@ -61,4 +73,7 @@ startServer().catch((err) => {
   console.error('Failed to initialize server:', err);
   process.exit(1);
 });
+
+
+
 

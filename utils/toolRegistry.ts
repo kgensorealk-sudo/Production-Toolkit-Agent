@@ -396,7 +396,8 @@ export const DASHBOARD_TOOL_IDS: ToolId[] = [
     ToolId.TABLE_BEAUTIFIER,
     ToolId.WORD_TO_XML,
     ToolId.VIEW_SYNC,
-    ToolId.STRUCTURAL_ARCHITECT
+    ToolId.STRUCTURAL_ARCHITECT,
+    ToolId.AFFILIATION_SEQUENCER
 ];
 
 export const EXPERIMENTAL_TOOL_IDS: (ToolId | string)[] = [
@@ -482,3 +483,4 @@ export function findToolsForScenario(query: string, includeNonDashboard: boolean
         return matchName || matchDesc || matchKeywords || matchScenarios;
     });
 }
+
