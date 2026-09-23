@@ -41,7 +41,7 @@ export default async function handler(
       });
     }
 
-    const result = runProductionPipeline({
+    const result = await runProductionPipeline({
       xml,
       cleanAction,
       qaInstruction,
