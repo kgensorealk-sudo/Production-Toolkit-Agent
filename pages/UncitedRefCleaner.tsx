@@ -756,7 +756,7 @@ const UncitedRefCleaner: React.FC = () => {
                                                         generate: (refs: RefItem[]) => {
                                                             const refText = refs.length === 1 ? `Reference [${refs[0].label || refs[0].id}] remains` : `The following references remain`;
                                                             const list = refs.length > 1 ? ` [${refs.map(r => r.label || r.id).join(', ')}]` : ` [${refs[0].label || refs[0].id}]`;
-                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}.\nKindly ask the author to provide an appropriate citation for this reference in the text.\n\nFile is on pending status until matter is resolved. Thank you.`;
+                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}.\nKindly ask the author to provide an appropriate citation for this reference in the text.\n\nThe file is in pending status until the matter is resolved. Thank you.`;
                                                         }
                                                     },
                                                     {
@@ -764,7 +764,7 @@ const UncitedRefCleaner: React.FC = () => {
                                                         description: "Standard verification for multiple orphans.",
                                                         generate: (refs: RefItem[]) => {
                                                             const list = refs.map(r => r.label || r.id).join(', ');
-                                                            return `TO THE JM:\nThe following references remain uncited in the text body: [${list}].\nKindly confirm if these may be deleted or advise if citations should be inserted in the text.\n\nFile is on pending status until matter is resolved. Thank you.`;
+                                                            return `TO THE JM:\nThe following references remain uncited in the text body: [${list}].\nKindly confirm if these may be deleted or advise if citations should be inserted in the text.\n\nThe file is in pending status until the matter is resolved. Thank you.`;
                                                         }
                                                     },
                                                     {
@@ -773,7 +773,7 @@ const UncitedRefCleaner: React.FC = () => {
                                                         generate: (refs: RefItem[]) => {
                                                             const refText = refs.length === 1 ? `Reference [${refs[0].label || refs[0].id}] remains` : `The following references remain`;
                                                             const list = refs.length > 1 ? ` [${refs.map(r => r.label || r.id).join(', ')}]` : ` [${refs[0].label || refs[0].id}]`;
-                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}, possibly due to changes in the citation.\nKindly confirm whether the citation should be reinstated or the reference removed.\n\nFile is on pending status until matter is resolved. Thank you.`;
+                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}, possibly due to changes in the citation.\nKindly confirm whether the citation should be reinstated or the reference removed.\n\nThe file is in pending status until the matter is resolved. Thank you.`;
                                                         }
                                                     },
                                                     {
@@ -782,7 +782,7 @@ const UncitedRefCleaner: React.FC = () => {
                                                         generate: (refs: RefItem[]) => {
                                                             const refText = refs.length === 1 ? `Reference [${refs[0].label || refs[0].id}] remains` : `The following references remain`;
                                                             const list = refs.length > 1 ? ` [${refs.map(r => r.label || r.id).join(', ')}]` : ` [${refs[0].label || refs[0].id}]`;
-                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}.\nKindly confirm if this reference is still relevant to the article. If not, please advise if it may be deleted.\n\nFile is on pending status until matter is resolved. Thank you.`;
+                                                            return `TO THE JM:\n${refText} uncited in the text body${refs.length > 1 ? list : list.trim()}.\nKindly confirm if this reference is still relevant to the article. If not, please advise if it may be deleted.\n\nThe file is in pending status until the matter is resolved. Thank you.`;
                                                         }
                                                     }
                                                 ].map((query, idx) => (

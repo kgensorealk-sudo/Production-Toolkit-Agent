@@ -60,7 +60,7 @@ Do not silently choose one version.
 
 When instructed that an item should remain pending, use this exact wording:
 
-File is on pending status until matter is resolved. Thank you.
+The file is in pending status until the matter is resolved. Thank you.
 
 ## Output
 

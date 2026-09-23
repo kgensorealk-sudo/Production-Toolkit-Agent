@@ -73,7 +73,7 @@ export const PRODUCTION_QA_RULES = {
     },
 
     pendingStatus:
-      'File is on pending status until matter is resolved. Thank you.',
+      'The file is in pending status until the matter is resolved. Thank you.',
   },
 
   layout: {

@@ -14,7 +14,7 @@ All Journal Manager queries should:
 
 When an item must remain pending, use the exact wording:
 
-File is on pending status until matter is resolved. Thank you.
+The file is in pending status until the matter is resolved. Thank you.
 
 ## JM Query Tone
 
