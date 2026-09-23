@@ -37,8 +37,87 @@ export interface ProductionQaResult {
   issueType: ProductionIssueType;
   status: ProductionQaStatus;
   finding: string;
+  findings: string[];
   recommendedAction: string;
   jmQueryRequired: boolean;
+}
+
+interface XmlStructuralCheck {
+  duplicateIds: string[];
+  brokenRefids: string[];
+  otherRefsMissingId: number;
+  idCount: number;
+  refidCount: number;
+}
+
+function inspectXml(xml: string): XmlStructuralCheck {
+  const ids = Array.from(
+    xml.matchAll(/(?<![A-Za-z])id="([^"]+)"/g),
+    (match) => match[1]
+  );
+
+  const refids = Array.from(
+    xml.matchAll(/\brefid="([^"]+)"/g),
+    (match) => match[1]
+  );
+
+  const idCounts = new Map<string, number>();
+
+  for (const id of ids) {
+    idCounts.set(id, (idCounts.get(id) || 0) + 1);
+  }
+
+  const duplicateIds = Array.from(idCounts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([id]) => id);
+
+  const idSet = new Set(ids);
+
+  const brokenRefids = Array.from(
+    new Set(
+      refids
+        .flatMap((value) => value.split(/\s+/).filter(Boolean))
+        .filter((refid) => !idSet.has(refid))
+    )
+  );
+
+  return {
+    duplicateIds,
+    brokenRefids,
+    otherRefsMissingId: Array.from(
+      xml.matchAll(/<ce:other-ref\b([^>]*)>/gi)
+    ).filter((match) => !/\bid="/i.test(match[1])).length,
+    idCount: ids.length,
+    refidCount: refids.length,
+  };
+}
+
+function buildXmlFinding(check: XmlStructuralCheck): string | null {
+  const findings: string[] = [];
+
+  if (check.otherRefsMissingId > 0) {
+    findings.push(
+      `${check.otherRefsMissingId} <ce:other-ref> element${check.otherRefsMissingId > 1 ? 's' : ''} missing required id attribute.`
+    );
+  }
+
+  if (check.duplicateIds.length > 0) {
+    findings.push(
+      `Duplicate ID${check.duplicateIds.length > 1 ? 's' : ''} found: ${check.duplicateIds.join(', ')}.`
+    );
+  }
+
+  if (check.brokenRefids.length > 0) {
+    findings.push(
+      `Broken REFID target${check.brokenRefids.length > 1 ? 's' : ''} found: ${check.brokenRefids.join(', ')}.`
+    );
+  }
+
+  if (findings.length === 0) {
+    return null;
+  }
+
+  return findings.join(' ');
 }
 
 function detectIssueType(input: string): ProductionIssueType {
@@ -267,6 +346,7 @@ export function analyzeProductionIssue(
       issue: 'No production issue was provided.',
       issueType: 'unknown',
       finding: 'There is not enough information to perform a QA assessment.',
+      findings: ['There is not enough information to perform a QA assessment.'],
       status: 'needs-information',
       recommendedAction:
         'Provide the production issue, author comment, or relevant content for review.',
@@ -275,14 +355,31 @@ export function analyzeProductionIssue(
   }
 
   const issueType = detectIssueType(input);
-  const status = detectQaStatus(input, issueType);
+  let status = detectQaStatus(input, issueType);
+  let finding = getFinding(issueType);
+  let findings: string[] = [];
 
-  return {
-    issue: input,
-    issueType,
-    status,
-    finding: getFinding(issueType),
-    recommendedAction: getRecommendedAction(issueType),
-    jmQueryRequired: requiresJmQuery(issueType, input),
-  };
+if (request.context?.cleanedXml && issueType === 'xml') {
+  const xmlCheck = inspectXml(request.context.cleanedXml as string);
+  const xmlFinding = buildXmlFinding(xmlCheck);
+
+  if (xmlFinding) {
+    finding = xmlFinding;
+    findings = [xmlFinding];
+
+    if (status === 'clear') {
+      status = 'needs-information';
+    }
+  }
+}
+
+return {
+  issue: input,
+  issueType,
+  status,
+  finding,
+  findings,
+  recommendedAction: getRecommendedAction(issueType),
+  jmQueryRequired: requiresJmQuery(issueType, input),
+};
 }
