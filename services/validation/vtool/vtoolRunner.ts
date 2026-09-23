@@ -18,8 +18,7 @@ export interface VtoolRunResult {
   stderr: string;
 }
 
-const DEFAULT_VTOOL_JAR =
-  'C:\\Users\\Kevin\\Desktop\\FL-Xtools\\Vtool-5.98.2\\vtool.jar';
+const DEFAULT_VTOOL_JAR = process.env.VTOOL_JAR_PATH ?? 'C:\\Users\\Kevin\\Desktop\\FL-Xtools\\Vtool-5.98.2\\vtool.jar';
 
 export async function runVtool(
   request: VtoolRunRequest
@@ -58,3 +57,4 @@ export async function runVtool(
     stderr
   };
 }
+
