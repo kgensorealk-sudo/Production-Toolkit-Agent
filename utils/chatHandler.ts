@@ -180,8 +180,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Check if user is inquiring about the Affiliation Sequencer or trying to sequence affiliations in XML
     const isAffiliationSequencingTask = 
-      (userTextLower.includes('affiliation') || userTextLower.includes('ce:affiliation') || userTextLower.includes('cross-ref') || userTextLower.includes('cross ref') || userTextLower.includes('refid')) &&
-      (userTextLower.includes('increments of 5') || userTextLower.includes('af0005') || userTextLower.includes('af0010') || userTextLower.includes('sequence') || userTextLower.includes('sequential') || userTextLower.includes('correct the id') || userTextLower.includes('af0020') || userTextLower.includes('af0025') || userTextLower.includes('cross-ref') || userTextLower.includes('cross ref'));
+      (userTextLower.includes('affiliation') || userTextLower.includes('ce:affiliation') || userTextLower.includes('refid')) &&
+      (userTextLower.includes('increments of 5') || userTextLower.includes('af0005') || userTextLower.includes('af0010') || userTextLower.includes('sequence') || userTextLower.includes('sequential') || userTextLower.includes('correct the id') || userTextLower.includes('af0020') || userTextLower.includes('af0025'));
 
     const isAffiliationToolInquiry = 
       (userTextLower.includes('affiliation') && (userTextLower.includes('tool') || userTextLower.includes('where') || userTextLower.includes('find') || userTextLower.includes('how') || userTextLower.includes('know'))) ||

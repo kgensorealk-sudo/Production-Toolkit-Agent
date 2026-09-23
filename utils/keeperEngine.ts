@@ -235,7 +235,7 @@ ${isAdmin
     // over any keyword-only rule, even "uncited" or "table" mentioned nearby.
     id: 'affiliation-xml-process',
     weight: 20,
-    match: ({ text }) => text.includes('<ce:affiliation') || text.includes('<ce:cross-ref'),
+    match: ({ text, lower }) => text.includes('<ce:affiliation') && (lower.includes('sequence') || lower.includes('sequential') || lower.includes('renumber') || lower.includes('increments of 5') || lower.includes('correct the id') || lower.includes('correct affiliation id')),
     respond: ({ text, lower }) => {
       const xmlMatch = text.match(/<([a-zA-Z0-9:]+\b[\s\S]*>)/);
       const xmlToProcess = xmlMatch ? xmlMatch[0] : text;
@@ -270,12 +270,10 @@ ${result.outputXml}
       lower.includes('af0010') ||
       lower.includes('af0020') ||
       lower.includes('af0025') ||
-      lower.includes('cross-ref') ||
-      lower.includes('cross ref') ||
       ((lower.includes("can't find") || lower.includes("cannot find") || lower.includes("where is the tool") || lower.includes("find the tool") || lower.includes("where is") || lower.includes("does not know")) &&
        (lower.includes('keeper') || lower.includes('tool') || lower.includes('affiliation') || lower.includes('sequencer'))),
     respond: ({ lower }) => {
-      if (lower.includes('cross-ref') || lower.includes('cross ref') || lower.includes('refid') || lower.includes('af0025')) {
+      if ( lower.includes('refid') || lower.includes('af0025')) {
         return `### 🐾 Cross-Reference Synchronization Update
 
 I have updated the **Affiliation Sequencer** and Keeper's processing engine to automatically synchronize author \`<ce:cross-ref refid="...">\` links when affiliation IDs are corrected!
@@ -1055,3 +1053,5 @@ CRITICAL DIRECTIVES:
 
 ${context ? `Current user workspace context:\n${context}` : ''}`;
 };
+
+
