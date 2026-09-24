@@ -1,4 +1,4 @@
-export type OptTagType = 'COMMENT' | 'INS' | 'DEL' | 'UNKNOWN';
+﻿export type OptTagType = 'COMMENT' | 'INS' | 'DEL' | 'UNKNOWN';
 
 export interface OptNestedElement {
   name: string;
@@ -13,6 +13,8 @@ export interface OptValidatorItem {
   attributes: Record<string, string>;
   content: string;
   raw: string;
+  startOffset: number;
+  endOffset: number;
   nestedElements: OptNestedElement[];
   ids: string[];
   refids: string[];
@@ -123,6 +125,8 @@ export function validateOptMarkup(input: string): OptValidatorResult {
       attributes,
       content,
       raw: match[0],
+      startOffset: match.index,
+      endOffset: match.index + match[0].length,
       nestedElements,
       ids: extractIds(nestedElements),
       refids: extractRefids(nestedElements),
@@ -147,6 +151,7 @@ export function validateOptMarkup(input: string): OptValidatorResult {
     warnings
   };
 }
+
 
 
 
