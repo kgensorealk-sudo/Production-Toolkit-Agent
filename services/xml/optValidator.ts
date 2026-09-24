@@ -1,4 +1,4 @@
-﻿export type OptTagType = 'COMMENT' | 'INS' | 'DEL' | 'UNKNOWN';
+export type OptTagType = 'COMMENT' | 'INS' | 'DEL' | 'UNKNOWN';
 
 export interface OptNestedElement {
   name: string;
@@ -100,7 +100,7 @@ export function validateOptMarkup(input: string): OptValidatorResult {
   const warnings: string[] = [];
 
   const optRegex =
-    /<(opt_[A-Za-z0-9_-]+)(\s+[^>]*?)(?:\/>|>([\s\S]*?)<\/\1\s*>)/gi;
+    /<(opt_[A-Za-z0-9_-]+)(?:\s+([^>]*?))?(?:\/>|>([\s\S]*?)<\/\1\s*>)/gi;
 
   let match: RegExpExecArray | null;
   let order = 1;
@@ -119,7 +119,7 @@ export function validateOptMarkup(input: string): OptValidatorResult {
       order: order++,
       type,
       tagName,
-      ...(attributes.ID ? { id: attributes.ID } : {}),
+      ...(Object.entries(attributes).find(([key]) => key.toLowerCase() === 'id')?.[1] ? { id: Object.entries(attributes).find(([key]) => key.toLowerCase() === 'id')?.[1] } : {}),
       attributes,
       content,
       raw: match[0],
@@ -135,7 +135,7 @@ export function validateOptMarkup(input: string): OptValidatorResult {
       warnings.push(`Unknown OPT tag detected: ${tagName}`);
     }
 
-    if (!attributes.ID) {
+    if (type === 'COMMENT' && !Object.entries(attributes).some(([key]) => key.toLowerCase() === 'id')) {
       warnings.push(`OPT tag ${tagName} has no ID attribute.`);
     }
   }
