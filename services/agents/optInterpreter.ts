@@ -109,6 +109,31 @@ function extractRequestedChange(
   };
 }
 
+function isBarePhraseCorrectionMarker(content: string): boolean {
+  const trimmed = content.trim();
+
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  const wordCount = trimmed.split(/\s+/).length;
+
+  if (wordCount > 6) {
+    return false;
+  }
+
+  const sentenceSignals = /\b(please|change|to|the|and|is|are|should|needs?)\b/i;
+
+  if (sentenceSignals.test(trimmed)) {
+    return false;
+  }
+
+  // Bare phrases of interest typically contain a dash/hyphen variant or
+  // similar punctuation swap candidate (e.g. em dash vs en dash), or are
+  // otherwise short symbolic fragments with no sentence structure.
+  return true;
+}
+
 function interpretComment(
   item: OptValidatorItem
 ): OptInterpretation | null {
@@ -163,6 +188,18 @@ function interpretComment(
         `The OPT_COMMENT explicitly requests changing "${requestedChange.from}" to "${requestedChange.to}" at the comment location.`,
       relatedItems: [item.order],
       requestedChange,
+    };
+  }
+
+  if (isBarePhraseCorrectionMarker(item.content)) {
+    return {
+      category: 'xml-correction',
+      scope: 'main-xml',
+      action: 'human-review',
+      confidence: 'low',
+      finding:
+        `The OPT_COMMENT is a short bare-phrase marker ("${item.content}") with no explicit "please change X to Y" wording. It likely refers to a correction pattern stated explicitly elsewhere in this document. No replacement target is inferred here; a human reviewer or the Resolver should confirm the intended change.`,
+      relatedItems: [item.order],
     };
   }
 
