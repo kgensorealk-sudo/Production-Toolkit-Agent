@@ -166,7 +166,15 @@ function interpretComment(
     };
   }
 
-  return null;
+  return {
+    category: 'unknown',
+    scope: 'unknown',
+    action: 'human-review',
+    confidence: 'low',
+    finding:
+      `The OPT_COMMENT was detected but does not match a recognized correction or instruction pattern. The full comment text should be reviewed: "${item.content}"`,
+    relatedItems: [item.order],
+  };
 }
 
 function interpretComments(
