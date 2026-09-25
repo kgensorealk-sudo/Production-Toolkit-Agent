@@ -277,9 +277,26 @@ This is a real journal author-proof PDF ("Multi-omics profiling of muscle tissue
 
 ---
 
+## Replication test: second PDF+XML pair (`CEJ_182103`)
+
+**Resolves priority-1 open item from the previous handover session.** Only two `edit_report.pdf` files exist in the Sample Files tree (`CEJ_182103`, `CBD_102008`); `CBD_102008` was already analyzed, so `CEJ_182103` was the only available second case.
+
+**XML confirmed via `Select-String -AllMatches`:** 27 `opt_COMMENT`, 1 `opt_DEL`, 1 `opt_INS` -- matches `testOptChain.ts`'s diagnostic output for this file exactly.
+
+**Bracketed `[Instruction: ...]` <-> `opt_COMMENT` correspondence: 27-of-27, fully replicated.** Unlike `CBD_102008` (9 distinct one-off instructions), this file's 27 comments are mostly one instruction repeated at each occurrence (26 instances of an em-dash-to-en-dash correction applied individually to `Pr-Co`, `Co-N`, `Pr-N`, `Pr-O`, `Pr-Pr`, `C-O` throughout the text), plus one distinct instruction (Figure S18 caption correction). Every comment traces to a matching PDF bracket; no PDF-only bracketed instructions found.
+
+- **Comment #8** (`"Pr-Co"`, bare phrase, no "please change" wording) -- independently confirms the real item that motivated the `db00eb5` evidence-preservation fix (previously "order 10" in the full-chain diagnostic). Matches the PDF's one bare `[Instruction: Pr-Co]` bracket.
+- **Comment #27** (Figure S18 caption correction) -- matches the PDF's closing Appendix A instruction almost verbatim (previously "order 29").
+
+**Numbered Query/Answer section: NOT replicated, and this matters.** `CBD_102008` had 7 PDF-only administrative Q&A items (author/Twitter/funding confirmation, uncited-reference cleanup) with no XML trace. `CEJ_182103`'s Q&A section has exactly one trivial entry (regular-issue-vs-special-issue confirmation) -- not an editorial correction, no XML counterpart to expect. So the "does Keeper need to track Q&A-style administrative content" question from the prior handover is **still open**, just untested by this file -- it simply didn't have much Q&A content to test against.
+
+**Conclusion on the PDF-extractor decision:** for the bracketed-instruction category specifically, 2-for-2 files show full correspondence with no PDF-only instructions. This supports deprioritizing a PDF extractor for that content type. The Q&A-content question remains unresolved and would need a third file with a substantial Q&A section (like `CBD_102008`'s) to test.
+
+**Tooling note, not a data bug:** `Get-Content -Raw` on this XML in PowerShell 5.1 without `-Encoding UTF8` displays comment text as `â€œ`/`â€"`-style garbage (e.g. `Prâ€"Co`). Re-reading with explicit `-Encoding UTF8` shows clean text (`Pr—Co`). This is confirmed to be a **console/display artifact of the default encoding PowerShell 5.1 assumes**, not corruption in the file bytes. Do not conflate this with the real, confirmed mis-encoding bug (`productionQaRules.ts`, `productionQaAgent.ts`, `package.json` -- still 4 locations, unchanged). Always use `-Encoding UTF8` when reading XML content in this project to avoid false positives.
+
 ## Immediate next steps (priority order)
 
-1. Check a second real PDF+XML pair (if one exists in the Sample Files tree) for replication of the bracket<->comment correspondence. Cheap, not urgent, resolves whether a PDF extractor is needed.
+1. ~~Check a second real PDF+XML pair for replication~~ -- DONE this session. See Replication test section above. Bracket<->comment correspondence replicates fully; Q&A-content question still open, untested by this file.
 2. Extend `extractRequestedChange` in `optInterpreter.ts` to catch the bare-phrase pattern (`<opt_COMMENT>Pr—Co</opt_COMMENT>` with no "please change" wording) -- no longer hypothetical, confirmed as order 10 in the real test run above.
 3. `xmlTagCleaner.ts` non-destructive revision -- still not started. Needs a shared per-item action vocabulary (`keeperDecision.ts` may serve this, or may need a dedicated "executor action" type distinct from the Decision contract).
 4. Wire the OPT chain into `productionPipeline.ts` (currently orphaned) -- now that the chain is verified correct end-to-end, this is more justified than before.
