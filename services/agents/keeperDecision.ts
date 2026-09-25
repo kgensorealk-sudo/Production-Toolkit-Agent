@@ -28,5 +28,7 @@ export interface KeeperDecisionOutcome {
   confidence: 'high' | 'medium' | 'low';
   reason: string;
   requiresJmQuery: boolean;
+  requiresGlimpse: boolean;
   relatedItems: number[];
 }
+
