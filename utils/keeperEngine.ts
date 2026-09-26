@@ -6,29 +6,24 @@
 import { sequenceAffiliationIdsStrict } from './affiliationSequencerLogic.js';
 
 /**
- * Ordered by capability, NOT tried in list order historically — this was the bug.
- * The API layer used to break on the FIRST model that returned anything, which meant
- * gemini-3.1-flash-lite (cheapest/weakest) almost always "won" and gemini-3.7-flash
- * (best) was rarely reached. Strongest model now goes first; weaker models are
- * true fallbacks for when the strong model is down or rate-limited.
- *
- * Each candidate now also declares its provider. This used to be an all-Gemini
- * chain, which meant a single Google-side outage or quota exhaustion (see: the
- * "free tier, 20 requests/day" incident) could take out every fallback at once,
- * since gemini-flash-latest shared the same quota bucket as gemini-3.7-flash.
- * The second slot is now OpenAI — a genuinely independent provider with its own
- * billing/quota — so a Gemini-side outage no longer kills the whole chain.
+ * OpenAI is primary (gpt-4o / gpt-4o-mini) -- paid, but reliable and independently
+ * billed/quota'd, so a Gemini-side outage or free-tier exhaustion (see: the old
+ * `free tier, 20 requests/day` incident) can't take out the whole chain.
+ * Gemini's Flash-family models are the fallback tier specifically because they're
+ * free (Google AI Studio, no credit card) -- cost-saving insurance, not the primary
+ * path. gemini-3.1-pro-preview was removed from the fallback list: since April 2026
+ * Gemini Pro models are no longer covered by the free tier, so keeping it here would
+ * silently defeat the point of using Gemini as a free fallback.
+ * Anthropic candidates were removed (unused -- no @anthropic-ai/sdk client existed
+ * in chatHandler.ts, so they silently fell through to the OpenAI branch and failed).
  */
-export const CANDIDATE_MODELS: { provider: 'gemini' | 'openai' | 'anthropic'; model: string }[] = [
-  { provider: 'gemini', model: 'gemini-3.8-flash' },      // Official default text model (fast & robust)
-  { provider: 'gemini', model: 'gemini-3.1-flash-lite' },  // Ultra-fast lightweight Gemini model
-  { provider: 'gemini', model: 'gemini-flash-latest' },   // Always-updated Flash alias
-  { provider: 'gemini', model: 'gemini-3.7-flash' },      // Gemini 3.7 reasoning model
-  { provider: 'gemini', model: 'gemini-3.1-pro-preview' }, // High-capability pro model
-  { provider: 'anthropic', model: 'claude-3-7-sonnet-20250219' }, // Anthropic Claude 3.7 Sonnet
-  { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },  // Fast Anthropic Claude 3.5 Haiku
-  { provider: 'openai', model: 'gpt-4o-mini' },           // OpenAI fallback when credits/key available
-  { provider: 'openai', model: 'gpt-4o' },                // OpenAI high-intelligence fallback
+export const CANDIDATE_MODELS: { provider: 'gemini' | 'openai'; model: string }[] = [
+  { provider: 'openai', model: 'gpt-4o' },                // Primary - high-intelligence
+  { provider: 'openai', model: 'gpt-4o-mini' },           // Primary - fast/cheap
+  { provider: 'gemini', model: 'gemini-3.8-flash' },      // Free-tier cost-saving fallback
+  { provider: 'gemini', model: 'gemini-3.1-flash-lite' }, // Free-tier cost-saving fallback (lightweight)
+  { provider: 'gemini', model: 'gemini-flash-latest' },   // Free-tier cost-saving fallback (alias)
+  { provider: 'gemini', model: 'gemini-3.7-flash' },      // Free-tier cost-saving fallback (reasoning)
 ];
 
 /**
@@ -1053,5 +1048,4 @@ CRITICAL DIRECTIVES:
 
 ${context ? `Current user workspace context:\n${context}` : ''}`;
 };
-
 
