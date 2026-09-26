@@ -1,4 +1,4 @@
-import { PRODUCTION_QA_RULES } from './productionQaRules.js';
+﻿import { PRODUCTION_QA_RULES } from './productionQaRules.js';
 
 export type ProductionIssueType =
   | 'author-correction'
@@ -120,8 +120,19 @@ function buildXmlFinding(check: XmlStructuralCheck): string | null {
   return findings.join(' ');
 }
 
+
+// Straight ASCII apostrophe (U+0027) vs curly/typographic apostrophe (U+2019,
+// U+2018) is a real signal-blindness risk here: user input typically arrives
+// with straight apostrophes, but some signal strings below were written with
+// curly ones (copy-pasted from formatted text). .includes() is exact-match,
+// so a curly-quote signal string silently never fires against straight-quote
+// input. Normalizing both sides to straight quotes here closes that gap for
+// every current and future signal string, not just the ones found so far.
+function normalizeApostrophes(value: string): string {
+  return value.replace(/[\u2018\u2019\u02BC]/g, "'");
+}
 function detectIssueType(input: string): ProductionIssueType {
-  const text = input.toLowerCase();
+  const text = normalizeApostrophes(input.toLowerCase());
 
   if (
     text.includes('xml') ||
@@ -198,14 +209,14 @@ function detectQaStatus(
     return 'unknown';
   }
 
-  const text = input.toLowerCase();
+  const text = normalizeApostrophes(input.toLowerCase());
 
   const conflictSignals = [
     'conflict',
     'conflicting',
     'different from',
     'does not match',
-    'doesn’t match',
+    'doesn\'t match',
     'current production',
     'production says',
     'production shows',
@@ -313,7 +324,7 @@ function requiresJmQuery(
     return true;
   }
 
-  const text = input.toLowerCase();
+  const text = normalizeApostrophes(input.toLowerCase());
 
   const clarificationSignals = [
     'author says',
@@ -323,7 +334,7 @@ function requiresJmQuery(
     'conflicting',
     'different from',
     'does not match',
-    'doesn’t match',
+    'doesn\'t match',
     'unclear',
     'ambiguous',
     'which one',

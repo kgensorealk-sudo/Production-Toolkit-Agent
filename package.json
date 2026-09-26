@@ -14,7 +14,9 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder build --windows --dir",
-    "electron:dist": "npm run build && electron-builder build --windows"
+    "electron:dist": "npm run build && electron-builder build --windows",
+    "check:encoding": "powershell -ExecutionPolicy Bypass -File tools/checkEncoding.ps1",
+    "prebuild": "npm run check:encoding"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",
