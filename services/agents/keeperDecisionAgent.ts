@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Keeper Decision Agent
  *
  * Decision logic that consumes OPT Interpreter and Context Resolver
@@ -7,6 +7,10 @@
  * This only covers the real, evidence-backed patterns seen so far:
  *   - DEL/INS replacement pairs (shared nested ID)
  *   - Single "please change X to Y" comment corrections
+ *   - Bare-phrase comments resolved via same-file sibling-pattern evidence
+ *     (Strategy A1) -- routed the same as explicit corrections once the
+ *     Resolver has supplied a resolution, since the Resolver is the only
+ *     layer allowed to know how a bare phrase got its requestedChange.
  *
  * Anything outside these known patterns falls through to
  * human-review rather than being guessed at.
@@ -51,6 +55,7 @@ function decideCommentCorrection(
 
   switch (resolution.status) {
     case 'resolved':
+    case 'resolved-by-sibling-pattern':
       return {
         order,
         decision: 'apply',
@@ -137,7 +142,7 @@ export function decideOptItem(
 
   if (
     interpretation.category === 'xml-correction' &&
-    interpretation.requestedChange &&
+    interpretation.action === 'human-review' &&
     resolution
   ) {
     return decideCommentCorrection(interpretation, resolution);
