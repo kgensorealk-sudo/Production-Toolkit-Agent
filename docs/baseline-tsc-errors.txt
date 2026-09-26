@@ -1,0 +1,29 @@
+﻿pages/LandingPage.tsx(34,37): error TS2339: Property 'isSubscribed' does not exist on type 'AuthContextType'.
+pages/LandingPage.tsx(34,51): error TS2339: Property 'isTrialing' does not exist on type 'AuthContextType'.
+pages/LandingPage.tsx(34,63): error TS2339: Property 'daysLeft' does not exist on type 'AuthContextType'.
+pages/LandingPage.tsx(34,73): error TS2339: Property 'authError' does not exist on type 'AuthContextType'.
+pages/Messaging.tsx(4,23): error TS2305: Module '"../types"' has no exported member 'Message'.
+pages/Messaging.tsx(4,32): error TS2305: Module '"../types"' has no exported member 'Channel'.
+pages/Messaging.tsx(44,10): error TS2305: Module '"../types"' has no exported member 'LinkPreview'.
+pages/Messaging.tsx(215,43): error TS2353: Object literal may only specify known properties, and 'last_global_read_at' does not exist in type 'Partial<UserProfile>'.
+pages/Messaging.tsx(429,44): error TS2339: Property 'last_global_read_at' does not exist on type 'UserProfile'.
+pages/Messaging.tsx(625,53): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+pages/Messaging.tsx(857,32): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+pages/Messaging.tsx(878,32): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+pages/Messaging.tsx(897,32): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+pages/Messaging.tsx(1737,112): error TS7006: Parameter 'url' implicitly has an 'any' type.
+pages/Messaging.tsx(1737,117): error TS7006: Parameter 'i' implicitly has an 'any' type.
+pages/Messaging.tsx(1780,104): error TS7006: Parameter 'url' implicitly has an 'any' type.
+pages/Messaging.tsx(1780,109): error TS7006: Parameter 'i' implicitly has an 'any' type.
+pages/Messaging.tsx(1790,83): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+pages/Messaging.tsx(1790,88): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(1796,74): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(1797,70): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(1799,100): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(1812,75): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+pages/Messaging.tsx(2576,89): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+pages/Messaging.tsx(2576,94): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(2582,78): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(2583,74): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(2585,106): error TS7006: Parameter 'r' implicitly has an 'any' type.
+pages/Messaging.tsx(2598,79): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
