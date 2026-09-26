@@ -1,6 +1,26 @@
-# Production Toolkit Agent — Handover
+# Production Toolkit Agent — Handover (Historical Record)
 
-This is a living document, updated in place each session. Do not assume it is fully up to date — inspect the repository (`git log`, `git status`, the files themselves) before making changes. This document is a snapshot, not a guarantee of current state.
+**⚠️ START HERE FIRST — NEW AI ONBOARDING DOCUMENT ⚠️**
+
+**Any AI picking up this project: open [ai-onboarding-handover.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/ai-onboarding-handover.md) immediately. It is the canonical, concise, start-here document created 2026-09-26. It contains:**
+- 5-minute onboarding checklist (3 commands to verify known-good state, no stale prose)
+- Current built-and-verified status with live-file re-verification instructions
+- 7 non-negotiable constraints, including the 3 hard lessons learned from past audit-trail drift
+- **Exact ordered next steps (NEXT STEP 1 → 7)** with code locations, verification steps, effort estimates, and gating conditions
+- 10 hard-learned gotchas (PowerShell encoding, BOM, line-index vs anchor-replace, npm.cmd vs npm, etc.)
+- Sanity checklist before any commit
+- Deep-dive reference links
+
+This document (handover.md) remains the historical record and reference for:
+- File inventory narrative descriptions
+- Real-file evidence deep dives (CEJ_182103 + CBD_102008)
+- PowerShell / environment gotchas long-form reference
+- Design rationale narrative (Keeper Decision, evidence-preservation fixes, etc.)
+- Git state snapshots (verify via `git log` rather than trusting)
+
+**Process rule (hard-learned 2026-09-26):** This document's audit-trail prose has drifted from live files at least once (Trae AI performed refactors between sessions and did not update this handover). ALWAYS RE-READ LIVE FILES BEFORE EDITING, regardless of what this or any doc claims. The 3 commands in ai-onboarding-handover.md § 0 are the ground truth.
+
+---
 
 **Environment note:** Development happens via PowerShell commands run on the user's local Windows machine (PowerShell 5.1), one command at a time, with output pasted back for review before the next command is given. There is no direct filesystem or terminal access from the assistant side. Commands meant to be executed are flagged "RUN THIS"; other snippets are reference only.
 
@@ -12,14 +32,17 @@ This is a living document, updated in place each session. Do not assume it is fu
 
 The sibling folder `C:\Users\Kevin\Desktop\FL-Xtools\Production-Toolkit\` (without the `-Agent` suffix) is the older non-Agent app shell and is **formally OUT OF SCOPE / FROZEN**. Do not read it, do not modify it, do not cross-reference modules between the two. If a module name appears in both places, the copy under `Production-Toolkit-Agent/` is the real one.
 
-Companion documents that supersede this handover's priority/narrative sections where they overlap:
-- **[project-decision-brief.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/project-decision-brief.md)** — architecture, constraints, priorities, and Phase 0 cleanup checklist. READ THIS BEFORE ANY CODING.
-- **[keeper-intelligence-and-learning-strategy.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/keeper-intelligence-and-learning-strategy.md)** — detailed implementation plan for deterministic (Strategy A), LLM-adjunct (Strategy B), and learning-distillation (Strategy C) improvements.
-- **[bugfix-handover-context-usage.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/bugfix-handover-context-usage.md)** — **2026-09-25 bug fix record.** Resolver context window expanded from 500-char backward-only to 2000-back + 500-forward. Supersedes the old "500 chars" line in the file inventory below. Read if you are debugging Resolver `unresolved` counts or target-finding.
+Companion documents by role:
+- **[ai-onboarding-handover.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/ai-onboarding-handover.md)** — **START HERE (2026-09-26).** Concise 5-minute onboarding, ordered next steps, live verification commands, all gotchas in one place. Supersedes this doc's status blocks and priority sections for current work.
+- **[project-decision-brief.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/project-decision-brief.md)** — Full constraints, architecture rationale, priority rationale, anti-temptation list, sanity checklist. Deep reference.
+- **[keeper-intelligence-and-learning-strategy.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/keeper-intelligence-and-learning-strategy.md)** — Full Strategy A/B/C specs, rollout gating with timers, learning loop with anti-rails, success metrics. Deep implementation reference.
+- **[bugfix-handover-context-usage.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/bugfix-handover-context-usage.md)** — 2026-09-25 Resolver window bugfix full record (root cause, fix details, 4 open follow-ups A/B/C/D). Read if debugging Resolver `unresolved` counts or target-finding.
 
 ---
 
-## ⚠️ PHASE 0 STATUS SNAPSHOT (verified 2026-09-26; re-audited 2026-09-26; **Phase 0.3 (a)+(c) COMPLETED 2026-09-26** — DO NOT trust prose below; this block takes precedence; **Phase 0.4 and 0.5 also COMPLETED 2026-09-26 (this session) -- PHASE 0 FULLY CLOSED.**)
+## ⚠️ PHASE 0 STATUS SNAPSHOT (PERMANENTLY CLOSED as of 2026-09-26)
+
+**This entire block is historical record. For current status + live verification commands, open [ai-onboarding-handover.md](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/ai-onboarding-handover.md) § 0 and § 1. Do NOT treat the prose below as ground truth; re-run the 3 onboarding commands to re-verify current state from live files.**
 
 **Audit history:**
 - **Snapshot 1** (2026-09-26, earlier): 5 Phase 0 items baseline check.
@@ -383,21 +406,20 @@ This is a real journal author-proof PDF ("Multi-omics profiling of muscle tissue
 
 **Tooling note, not a data bug:** `Get-Content -Raw` on this XML in PowerShell 5.1 without `-Encoding UTF8` displays comment text as `â€œ`/`â€"`-style garbage (e.g. `Prâ€"Co`). Re-reading with explicit `-Encoding UTF8` shows clean text (`Pr—Co`). This is confirmed to be a **console/display artifact of the default encoding PowerShell 5.1 assumes**, not corruption in the file bytes. Do not conflate this with the source-code mojibake bug (source-level mojibake characters now **confirmed removed** from all `.ts`/`.tsx`/`.json` files per 2026-09-26 Phase 0 audit above; guard script still missing). Always use `-Encoding UTF8` when reading XML content in this project to avoid false positives.
 
-## Immediate next steps (priority order, updated 2026-09-26)
+## Next Steps (priority order) — REDIRECT
 
-**Phase 0 is now FULLY CLOSED (0.1, 0.3(a,b,c), 0.4, and 0.5 all done and independently verified, session 2026-09-26). Proceed to project-decision-brief.md priorities next (see below).**
+**Phase 0 is PERMANENTLY CLOSED (all 5 items re-verified independently 2026-09-26). All items above (1–7) are historical DONE records.**
 
-1. ~~Check a second real PDF+XML pair for replication~~ — DONE. See Replication test section above.
-2. ~~Extend `extractRequestedChange` to catch the bare-phrase pattern~~ — DONE (commit `77e8559`). `isBarePhraseCorrectionMarker` in [optInterpreter.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optInterpreter.ts#L112-L135) correctly labels short symbolic fragments as `xml-correction` without inferring a transformation.
-3. ~~Phase 0.3(a) Collapse all LLM call sites into SDK + 0.3(c) jsonSchema branches~~ — DONE THIS SESSION. `services/ai/llmSdk.ts` is now the **single execution boundary** for every LLM API call in the repo (post-refactor grep for `new GoogleGenAI` / `new OpenAI(` / `.models.generateContent` / `chat.completions.create` across all `.ts`/`.tsx` files returned hits ONLY inside `llmSdk.ts`; zero elsewhere). Inline duplicate provider clients, candidate fallback loops, and provider-specific payload shaping deleted from:
-   - [chatHandler.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/utils/chatHandler.ts) (replaced ~120 lines with a single `callChatWithHistory()` call; chatHandler retains CORS / subscription gating / offline FAQ / affiliation routing / QA dispatch / sanitizeOutput wrapping / error fallback chain)
-   - [grantExtractHandler.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/utils/grantExtractHandler.ts) (same pattern; `CANDIDATES` typed to the SDK's `LlmCandidate[]`)
-   - [JmQueryGenerator.tsx](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/pages/JmQueryGenerator.tsx) (no longer constructs a GoogleGenAI client or detects API keys client-side → posts to new [api/jm-query.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/api/jm-query.ts) + mirror [api/ai/jm-query.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/api/ai/jm-query.ts) backed by new [jmQueryHandler.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/utils/jmQueryHandler.ts) which routes through the SDK; API keys no longer exposed to React bundle — secondary security win)
-4. ~~Phase 0.3(b) -- Add `openai-compatible` local-provider baseURL branch~~ -- DONE (see dated update block above). `LlmProvider` extended, `LlmCandidate.baseURL` added, per-baseURL client cache implemented.
-5. **🔗 Phase 0.4 — Wire OPT chain into pipeline additively** (HIGH PRIORITY — gates all real-data metrics): Edit [runProductionPipeline](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/productionPipeline.ts#L24-L46) to run `validateOptMarkup → interpretOptMarkup → resolveOptCommentContext` on the raw `request.xml` BEFORE the existing `cleanXmlTags` call. Extend `ProductionPipelineResult` with an `optChain?` field storing all three outputs. Do not remove or alter `cleanXmlTags` yet; this is 100% additive. **Confirmed this session: run the chain against raw `request.xml`, never `cleanResult.output` -- `cleanXmlTags` strips all OPT tags unconditionally, so chaining after it would silently zero out every metric.** Prove against real CEJ_182103.xml that `result.optChain.validation.total === 29`. **DONE -- independently re-verified this session (see Phase 0 Status Snapshot session-update block above); confirmed via runProductionPipeline() directly, not just standalone modules.**
-6. ~~🛡️ Phase 0.1 guard script + QA apostrophe normalization~~ — **DONE, fully verified this session (both halves).** See "Session update (2026-09-26, later still — Phase 0.1 (item 6) NOW FULLY CLOSED...)" note above. Guard-script half: two real bugs found and fixed in `tools/checkEncoding.ps1` (dead `\x9D` escape; em-dash/en-dash patterns byte-identical and both wrong), confirmed PASS (93 files, exit 0) directly and via `npm.cmd run check:encoding` after wiring `check:encoding` + `prebuild` into `package.json`. QA-fix half: [productionQaAgent.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/productionQaAgent.ts) confirmed to have a `normalizeApostrophes()` helper applied on the input side at all 4 relevant call sites, matched against straight-quote signal-string literals — verified by direct code-point dump, not just visual inspection. **Note for this machine:** plain `npm run ...` fails with a PSSecurityException (execution policy `Restricted`, pre-existing, unrelated to this repo's code) — use `npm.cmd run ...` instead.
-7. **🧹 Phase 0.5 — Remove route noise** (LOW EFFORT, 5 minutes): Delete `/affiliationIdSequencer` and `/affiliation-id-normalizer` from [App.tsx](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/App.tsx#L173-L174). Keep `/affiliationSequencer`. **DONE this session -- both routes removed, confirmed via targeted diff + clean tsc.**
+**Ordered next steps with exact specs, code locations, verification steps, and gating conditions live in:**
+👉 **[ai-onboarding-handover.md § 3 — Ordered Next Steps (NEXT STEP 1 → 7)](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/ai-onboarding-handover.md#3-ordered-next-steps-do-these-in-order--no-skipping)**
 
-Once Phase 0 closes completely (all 5 items green + verified), proceed to project-decision-brief.md priorities in order: Priority 1 replication-3rd-file (if still unproven), then Strategy A4 (Interpreter phrase regex expansion — add `replace`/`update`/`swap` synonyms, Unicode `→` arrow, curly/straight quote and apostrophe normalization to `extractRequestedChange` in [optInterpreter.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optInterpreter.ts#L98-L100)), then A1 (Sibling Evidence Resolver: `DocumentPattern` + cluster-size ≥ 3 + `resolved-by-sibling`), then Strategy B1 (LLM Resolver Adjunct — gated on 0.3(b) completion), then Priority 4 Executor.
+Quick summary of the order (see the onboarding doc for full spec):
+1. **Priority 1 — 3rd PDF+XML replication check** (closes PDF-ingestion question forever, 1 session)
+2. **Strategy A4 — Expand Interpreter phrase patterns** (6–8 regex variants for literal X→Y syntaxes, 30–60 mins)
+3. **Strategy A1 — Sibling Evidence Resolver** (bare-phrase via cluster ≥3 DocumentPattern, `resolved-by-sibling-pattern`, 1–2 sessions)
+4. **Priority 4 — Executor + Decision Log (C2)** (replace xmlTagCleaner OPT logic with per-item decision-driven mutation, 2–3 sessions)
+5. **Strategy A2 — Style Codebook** (3–5 seed rules, codebook resolver path)
+6. **Strategy B Phase 1 — LLM Resolver Adjunct, SHADOW MODE 4+ weeks** (fail-closed, Resolver-validated candidates only)
+7. **Strategy C3 — Weekly Learning Batch tool** (cluster Decision Log, human-gated rule proposals)
 
-Do not skip inspection: confirm current `git log`, `git status`, and re-read any file before editing it. This handover is a snapshot, not a guarantee of current state.
+Do not skip inspection: confirm current `git log`, `git status`, and re-read any file before editing it. This handover is a snapshot, not a guarantee of current state. The 3 commands in [ai-onboarding-handover.md § 0](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/ai-onboarding-handover.md#0-5-minute-onboarding-do-these-first--in-order) are the ground truth.
