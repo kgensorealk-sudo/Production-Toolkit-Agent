@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI } from '@google/genai';
-import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import {
   CANDIDATE_MODELS,
@@ -13,6 +11,12 @@ import {
 } from './keeperEngine.js';
 import { sequenceAffiliationIdsStrict } from './affiliationSequencerLogic.js';
 import { analyzeProductionIssue } from '../services/agents/productionQaAgent.js';
+import {
+  callChatWithHistory,
+  hasAnyLlmProvider,
+  ChatMessage,
+  LlmCandidate,
+} from '../services/ai/llmSdk.js';
 
 export const config = {
   runtime: 'nodejs',
@@ -105,29 +109,6 @@ async function verifySubscriptionAccess(req: VercelRequest): Promise<{ authorize
       error: 'Unable to verify subscription status. Please try again.'
     };
   }
-}
-
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
-
-function getOpenAIClient(): OpenAI | null {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new OpenAI({ apiKey });
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -305,11 +286,11 @@ The **Affiliation Sequencer** is available directly in the workspace:
       });
     }
 
-    const geminiClient = getGeminiClient();
-    const openaiClient = getOpenAIClient();
-
-    // If NEITHER provider has a key configured, go straight to the offline engine
-    if (!geminiClient && !openaiClient) {
+    // If NEITHER provider has a key configured, go straight to the offline engine.
+    // Provider presence check is delegated to the SDK; if hasAnyLlmProvider() is
+    // false we skip the SDK call entirely to avoid the throw and land on the
+    // correct offline-keeper (not offline-keeper-fallback) model label.
+    if (!hasAnyLlmProvider()) {
       const offlineReply = lastUserMessage
         ? generateOfflineKeeperResponse(lastUserMessage.content || '', context)
         : generateOfflineKeeperResponse('hello', context);
@@ -322,85 +303,51 @@ The **Affiliation Sequencer** is available directly in the workspace:
       });
     }
 
-    let systemInstruction = buildKeeperSystemInstruction(context);
+    const systemInstruction = buildKeeperSystemInstruction(context);
 
-    // Gemini-shaped message format.
-    const geminiContents = messages.map((m: { role: string; content: string }) => ({
-      role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-
-    // OpenAI-shaped message format — system prompt is its own message, and
-    // roles are 'user' | 'assistant' rather than Gemini's 'user' | 'model'.
-    const openaiMessages = [
-      { role: 'system' as const, content: systemInstruction },
-      ...messages.map((m: { role: string; content: string }) => ({
-        role: (m.role === 'assistant' || m.role === 'model' ? 'assistant' : 'user') as 'assistant' | 'user',
+    // chatHandler is no longer the LLM-calling boundary. The SDK owns provider
+    // construction, candidate fallback, per-model timeout, and provider-
+    // specific payload shaping. chatHandler retains: subscription gating,
+    // task dispatch to offline/affiliation/QA routes, onError diagnostics
+    // logging through console.warn for per-candidate visibility, and the
+    // outer sanitizeOutput()/offline fallback chain.
+    const chatMessages: ChatMessage[] = messages
+      .filter((m: any) => m && typeof m.content === 'string')
+      .map((m: { role: string; content: string }) => ({
+        role:
+          m.role === 'system'
+            ? 'system'
+            : m.role === 'assistant' || m.role === 'model'
+              ? 'assistant'
+              : 'user',
         content: m.content,
-      })),
-    ];
-
-    // Per-model timeout budget (12s max per candidate to allow reliable completion while failing over if hanging)
-    const PER_MODEL_TIMEOUT_MS = 12000;
+      }));
 
     let reply = '';
     let activeModel = '';
-    let lastError: any = null;
 
-    for (let i = 0; i < CANDIDATE_MODELS.length; i++) {
-      const candidate = CANDIDATE_MODELS[i];
-      const timeoutMs = PER_MODEL_TIMEOUT_MS;
-
-      // Skip a candidate outright if its provider has no API key configured,
-      // rather than burning a timeout slot on a call we know will fail.
-      if (candidate.provider === 'gemini' && !geminiClient) continue;
-      if (candidate.provider === 'openai' && !openaiClient) continue;
-
-      try {
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Model ${candidate.model} request timed out after ${timeoutMs / 1000}s`)),
-            timeoutMs
-          )
-        );
-
-        let text = '';
-
-        if (candidate.provider === 'gemini') {
-          const modelPromise = geminiClient!.models.generateContent({
-            model: candidate.model,
-            contents: geminiContents,
-            config: {
-              systemInstruction,
-              // NOTE: temperature/top_p/top_k intentionally omitted. Gemini 3.x models
-              // (gemini-3.7-flash, and gemini-flash-latest when it points at a 3.x build)
-              // do not support these legacy sampling parameters — sending them was causing
-              // every call to those two models to fail, silently pushing every request down
-              // to gemini-3.1-flash-lite or the offline fallback engine. If output consistency
-              // becomes an issue again, use the model's thinking_level parameter instead.
-            },
-          });
-          const response: any = await Promise.race([modelPromise, timeoutPromise]);
-          text = response?.text || '';
-        } else {
-          // OpenAI provider
-          const modelPromise = openaiClient!.chat.completions.create({
-            model: candidate.model,
-            messages: openaiMessages,
-          });
-          const response: any = await Promise.race([modelPromise, timeoutPromise]);
-          text = response?.choices?.[0]?.message?.content || '';
-        }
-
-        if (text) {
-          reply = text;
-          activeModel = candidate.model;
-          break;
-        }
-      } catch (modelErr: any) {
-        console.warn(`[AI Copilot - Vercel] Model ${candidate.model} (${candidate.provider}) encountered error:`, modelErr?.message || modelErr);
-        lastError = modelErr;
-      }
+    try {
+      const result = await callChatWithHistory(chatMessages, {
+        candidates: CANDIDATE_MODELS as LlmCandidate[],
+        systemInstruction,
+        timeoutMs: 12000,
+        onError: (candidate: LlmCandidate, modelErr: unknown) => {
+          const message = modelErr instanceof Error ? modelErr.message : String(modelErr);
+          console.warn(
+            `[AI Copilot - Vercel] Model ${candidate.model} (${candidate.provider}) encountered error:`,
+            message
+          );
+        },
+      });
+      reply = result.text;
+      activeModel = result.model;
+    } catch (_sdkErr: unknown) {
+      // Absorb at this layer; reply stays empty so the existing fallback
+      // path below runs with label "offline-keeper-fallback". The SDK has
+      // already propagated the individual onError diagnostics above for
+      // every candidate that failed, so we don't double-log here.
+      reply = '';
+      activeModel = '';
     }
 
     if (!reply) {

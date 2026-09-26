@@ -10,68 +10,10 @@ import {
     Info,
     Send
 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
 import Toast from '../components/Toast';
 import LoadingOverlay from '../components/LoadingOverlay';
 
-const QUICK_SUGGESTIONS = [
-    { label: 'Author Addition', text: 'Author wants to add [Name] to the author list.' },
-    { label: 'Title Change', text: 'Author provided a revised article title: [New Title].' },
-    { label: 'Uncited Figure', text: 'Figure [X] is currently uncited in the text body.' },
-    { label: 'Replacement Figure', text: 'Author provided a replacement for Figure [X]. No details provided.' },
-    { label: 'Mismatch Panels', text: 'Panels [X] are mentioned in the caption but missing in artwork.' },
-    { label: 'Coversheet Update', text: 'Update coversheet for [X] physical figures.' },
-];
-
-const JmQueryGenerator: React.FC = () => {
-    const [input, setInput] = useState('');
-    const [output, setOutput] = useState('');
-    const [feedback, setFeedback] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
-    const [copied, setCopied] = useState(false);
-
-    const handleSuggestionClick = (text: string) => {
-        setInput(prev => prev ? `${prev}\n${text}` : text);
-    };
-
-    const handleGenerate = async (isRefining = false) => {
-        if (!input.trim()) {
-            setToast({ msg: "Please provide raw notes or comments.", type: "error" });
-            return;
-        }
-
-        if (isRefining && !feedback.trim()) {
-            setToast({ msg: "Please provide feedback for correction.", type: "error" });
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            // Robust API key retrieval
-            const envKey = (process.env.GEMINI_API_KEY);
-            const viteKey = (process.env.VITE_GEMINI_API_KEY);
-            const metaKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY);
-            const fallbackKey = (process.env.API_KEY);
-            
-            const apiKey = envKey || viteKey || metaKey || fallbackKey;
-                           
-            if (!apiKey) {
-                console.error("API Key Detection Failed:", { envKey: !!envKey, viteKey: !!viteKey, metaKey: !!metaKey, fallbackKey: !!fallbackKey });
-                throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in your Vercel Environment Variables and redeploy. If testing locally, ensure it is in your .env file.");
-            }
-            const ai = new GoogleGenAI({ apiKey });
-            
-            let prompt = input;
-            if (isRefining) {
-                prompt = `ORIGINAL INPUT: ${input}\n\nPREVIOUS GENERATED QUERY: ${output}\n\nUSER FEEDBACK/CORRECTION: ${feedback}\n\nPlease regenerate the query based on the feedback while still following all the core rules.`;
-            }
-
-            const response = await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
-                contents: prompt,
-                config: {
-                    systemInstruction: `You are an expert Journal Production Editor.
+const JM_QUERY_SYSTEM_INSTRUCTION = `You are an expert Journal Production Editor.
 Your task is to transform raw production notes, author comments, or artwork/metadata issues into formal, standardized TO THE JM queries.
 
 CORE FORMATTING RULES:
@@ -110,14 +52,66 @@ OUTPUT REQUIREMENTS:
 - Include pending clause when required.
 - Follow all formatting rules strictly.
 - Output ONLY the final query.
-- Do NOT include explanations, commentary, or labels.`
-                }
-            });
+- Do NOT include explanations, commentary, or labels.`;
 
-            setOutput(response.text || '');
+const QUICK_SUGGESTIONS = [
+    { label: 'Author Addition', text: 'Author wants to add [Name] to the author list.' },
+    { label: 'Title Change', text: 'Author provided a revised article title: [New Title].' },
+    { label: 'Uncited Figure', text: 'Figure [X] is currently uncited in the text body.' },
+    { label: 'Replacement Figure', text: 'Author provided a replacement for Figure [X]. No details provided.' },
+    { label: 'Mismatch Panels', text: 'Panels [X] are mentioned in the caption but missing in artwork.' },
+    { label: 'Coversheet Update', text: 'Update coversheet for [X] physical figures.' },
+];
+
+const JmQueryGenerator: React.FC = () => {
+    const [input, setInput] = useState('');
+    const [output, setOutput] = useState('');
+    const [feedback, setFeedback] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
+    const [copied, setCopied] = useState(false);
+
+    const handleSuggestionClick = (text: string) => {
+        setInput(prev => prev ? `${prev}\n${text}` : text);
+    };
+
+    const handleGenerate = async (isRefining = false) => {
+        if (!input.trim()) {
+            setToast({ msg: "Please provide raw notes or comments.", type: "error" });
+            return;
+        }
+
+        if (isRefining && !feedback.trim()) {
+            setToast({ msg: "Please provide feedback for correction.", type: "error" });
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const requestBody: { input: string; refine?: { previous: string; feedback: string } } = { input };
+            if (isRefining) {
+                requestBody.refine = { previous: output, feedback };
+            }
+            const response = await fetch('/api/jm-query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+            });
+            if (!response.ok) {
+                const payload: any = await response.json().catch(() => ({ error: 'JM Query endpoint returned an HTTP error.' }));
+                throw new Error(payload?.error || `HTTP ${response.status}: JM Query request failed.`);
+            }
+            const data: { reply?: string; modelUsed?: string } = await response.json();
+            const text = (data?.reply || '').trim();
+            if (!text) {
+                throw new Error('JM Query endpoint returned an empty response. Please try again.');
+            }
+            setOutput(text);
             if (isRefining) {
                 setFeedback('');
                 setToast({ msg: "Query refined based on feedback.", type: "success" });
+            } else {
+                setToast({ msg: `Query generated via ${data?.modelUsed || 'server engine'}.`, type: "success" });
             }
         } catch (error: any) {
             console.error("Generation Error:", error);

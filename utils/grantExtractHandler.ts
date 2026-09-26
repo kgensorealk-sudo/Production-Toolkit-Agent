@@ -1,41 +1,22 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI } from '@google/genai';
-import OpenAI from 'openai';
 import { 
   GRANT_EXTRACTION_SYSTEM_PROMPT, 
   sanitizeGrantExtractionResult, 
   extractGrantsOffline 
 } from './grantExtractor.js';
+import {
+  callChatWithHistory,
+  hasAnyLlmProvider,
+  ChatMessage,
+  LlmCandidate,
+} from '../services/ai/llmSdk.js';
 
 export const config = {
   runtime: 'nodejs',
   maxDuration: 30,
 };
 
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
-
-function getOpenAIClient(): OpenAI | null {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new OpenAI({ apiKey });
-}
-
-const CANDIDATES: Array<{ model: string; provider: 'gemini' | 'openai' }> = [
+const CANDIDATES: LlmCandidate[] = [
   { model: 'gemini-3.8-flash', provider: 'gemini' },
   { model: 'gemini-3.1-flash-lite', provider: 'gemini' },
   { model: 'gemini-flash-latest', provider: 'gemini' },
@@ -65,11 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Funding statement is required.' });
     }
 
-    const geminiClient = getGeminiClient();
-    const openaiClient = getOpenAIClient();
-
     // If neither provider is configured, run offline extractor immediately
-    if (!geminiClient && !openaiClient) {
+    if (!hasAnyLlmProvider()) {
       const offlineResult = extractGrantsOffline(textToAnalyze);
       return res.json({
         result: offlineResult.formattedText,
@@ -80,68 +58,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const prompt = `Analyze the following funding statement according to your instructions:\n\n"""\n${textToAnalyze}\n"""`;
+    const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
+
     let rawOutput = '';
     let activeModel = '';
-    const TIMEOUT_MS = 12000;
 
-    for (const candidate of CANDIDATES) {
-      if (candidate.provider === 'gemini' && !geminiClient) continue;
-      if (candidate.provider === 'openai' && !openaiClient) continue;
-
-      try {
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Model ${candidate.model} request timed out after ${TIMEOUT_MS / 1000}s`)),
-            TIMEOUT_MS
-          )
-        );
-
-        let outputText = '';
-
-        if (candidate.provider === 'gemini') {
-          const apiPromise = geminiClient!.models.generateContent({
-            model: candidate.model,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: `Analyze the following funding statement according to your instructions:\n\n"""\n${textToAnalyze}\n"""`,
-                  },
-                ],
-              },
-            ],
-            config: {
-              systemInstruction: GRANT_EXTRACTION_SYSTEM_PROMPT,
-            },
-          });
-
-          const response: any = await Promise.race([apiPromise, timeoutPromise]);
-          outputText = (response?.text || '').trim();
-        } else if (candidate.provider === 'openai') {
-          const apiPromise = openaiClient!.chat.completions.create({
-            model: candidate.model,
-            messages: [
-              { role: 'system', content: GRANT_EXTRACTION_SYSTEM_PROMPT },
-              {
-                role: 'user',
-                content: `Analyze the following funding statement according to your instructions:\n\n"""\n${textToAnalyze}\n"""`,
-              },
-            ],
-          });
-
-          const response: any = await Promise.race([apiPromise, timeoutPromise]);
-          outputText = (response?.choices?.[0]?.message?.content || '').trim();
-        }
-
-        if (outputText) {
-          rawOutput = outputText;
-          activeModel = candidate.model;
-          break;
-        }
-      } catch (err) {
-        console.warn(`[grant-extract] ${candidate.model} failed, trying next candidate:`, err);
-      }
+    try {
+      const result = await callChatWithHistory(messages, {
+        candidates: CANDIDATES,
+        systemInstruction: GRANT_EXTRACTION_SYSTEM_PROMPT,
+        timeoutMs: 12000,
+        onError: (candidate, err) => {
+          console.warn(
+            `[grant-extract] ${candidate.model} failed, trying next candidate:`,
+            err instanceof Error ? err.message : err
+          );
+        },
+      });
+      rawOutput = (result.text || '').trim();
+      activeModel = result.model;
+    } catch {
+      // Absorb at this layer; rawOutput stays empty so the existing fallback
+      // path runs with label "offline-keeper-fallback". Per-candidate errors
+      // are already logged via onError above, so we don't double-log.
+      rawOutput = '';
+      activeModel = '';
     }
 
     // If AI calls produced a response, sanitize and parse
