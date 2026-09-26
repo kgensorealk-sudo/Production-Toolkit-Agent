@@ -1,14 +1,17 @@
 /**
  * tools/testOptChain.ts
  *
- * Manual diagnostic script — NOT part of the production pipeline.
+ * Manual diagnostic script -- NOT part of the production pipeline.
  *
  * Runs a real production XML file through the full OPT chain:
  *   Validator -> Interpreter -> Context Resolver -> Keeper Decision
  *
  * Prints a per-item summary and final tallies so we can see the true
  * end-to-end picture, now that the Interpreter no longer silently
- * drops unmatched comments (see db00eb5).
+ * drops unmatched comments (see db00eb5), and now that bare-phrase
+ * comments are additionally offered to the Resolver's sibling-pattern
+ * post-pass (Strategy A1) rather than being excluded purely because
+ * the Interpreter never gave them an explicit requestedChange.
  *
  * Usage:
  *   npx tsx tools/testOptChain.ts
@@ -65,15 +68,31 @@ function main(): void {
       to: interp.requestedChange!.to,
     }));
 
+  const bareCandidates = interpretation.interpretations
+    .filter(
+      (interp) =>
+        interp.category === 'xml-correction' &&
+        interp.action === 'human-review' &&
+        !interp.requestedChange
+    )
+    .map((interp) => {
+      const order = interp.relatedItems[0];
+      const item = validation.items.find((candidate) => candidate.order === order);
+      return item ? { order, content: item.content } : null;
+    })
+    .filter((candidate): candidate is { order: number; content: string } => candidate !== null);
+
   console.log('\n' + '='.repeat(80));
   console.log('STAGE 3: CONTEXT RESOLVER');
   console.log('='.repeat(80));
   console.log(`requestedChanges to resolve: ${requestedChanges.length}`);
+  console.log(`bareCandidates offered to sibling-pattern post-pass: ${bareCandidates.length}`);
 
   const resolutions = resolveOptCommentContext({
     xml,
     validation,
     requestedChanges,
+    bareCandidates,
   });
 
   const resolutionByOrder = new Map<number, OptContextResolution>();
@@ -88,7 +107,7 @@ function main(): void {
   console.log('by status:', statusCounts);
 
   console.log('\n' + '='.repeat(80));
-  console.log('STAGE 4: KEEPER DECISION — per-item summary');
+  console.log('STAGE 4: KEEPER DECISION -- per-item summary');
   console.log('='.repeat(80));
 
   const header = [
@@ -108,9 +127,7 @@ function main(): void {
 
   for (const interp of interpretation.interpretations) {
     const order = interp.relatedItems[0];
-    const resolution = interp.requestedChange
-      ? resolutionByOrder.get(order)
-      : undefined;
+    const resolution = resolutionByOrder.get(order);
 
     const outcome = decideOptItem({ interpretation: interp, resolution });
 
