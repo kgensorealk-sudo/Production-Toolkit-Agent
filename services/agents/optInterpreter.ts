@@ -91,22 +91,55 @@ function findReplacementPairs(
 function extractRequestedChange(
   content: string
 ): { from: string; to: string } | null {
-  const normalized = content
+  let normalized = content
     .replace(/\u201c/g, '"')
-    .replace(/\u201d/g, '"');
+    .replace(/\u201d/g, '"')
+    .replace(/\u2018/g, "'")
+    .replace(/\u2019/g, "'")
+    .replace(/`/g, "'");
 
-  const match = normalized.match(
-    /please\s+change\s+"([^"]+)"\s+to\s+"([^"]+)"/i
-  );
+  // Normalize directional arrow variants to the literal word "to" so every
+  // pattern below only needs to look for verb/connector words, not symbols.
+  normalized = normalized.replace(/\s*(?:\u2192|\u21d2|->)\s*/g, ' to ');
 
-  if (!match) {
-    return null;
+  const trimmed = normalized.trim();
+
+  const QUOTED = `['"]([^'"]+)['"]`;
+  const BARE = `(\\S+)`;
+
+  // Quoted-token patterns: quotes are a strong, self-delimiting signal, so
+  // these may match anywhere in the comment, same as the original regex.
+  const quotedPatterns: RegExp[] = [
+    new RegExp(`(?:please\\s+)?change\\s+${QUOTED}\\s+to\\s+${QUOTED}`, 'i'),
+    new RegExp(`replace\\s+${QUOTED}\\s+with\\s+${QUOTED}`, 'i'),
+    new RegExp(`update\\s+${QUOTED}\\s+to\\s+${QUOTED}`, 'i'),
+    new RegExp(`swap\\s+${QUOTED}\\s+for\\s+${QUOTED}`, 'i'),
+    new RegExp(`^${QUOTED}\\s+to\\s+${QUOTED}$`, 'i'), // verb-less (arrow-derived)
+  ];
+
+  // Bare-token patterns: no quotes delimit the tokens, so the ENTIRE comment
+  // (after trim) must match -- otherwise "change X to Y" could false-positive
+  // inside a longer descriptive sentence that isn't really a token swap.
+  const barePatterns: RegExp[] = [
+    new RegExp(`^(?:please\\s+)?change\\s+${BARE}\\s+to\\s+${BARE}\\.?$`, 'i'),
+    new RegExp(`^replace\\s+${BARE}\\s+with\\s+${BARE}\\.?$`, 'i'),
+    new RegExp(`^update\\s+${BARE}\\s+to\\s+${BARE}\\.?$`, 'i'),
+    new RegExp(`^swap\\s+${BARE}\\s+for\\s+${BARE}\\.?$`, 'i'),
+    new RegExp(`^${BARE}\\s+to\\s+${BARE}\\.?$`, 'i'), // verb-less bare (arrow-derived)
+  ];
+
+  for (const pattern of [...quotedPatterns, ...barePatterns]) {
+    const match = trimmed.match(pattern);
+
+    if (match) {
+      return {
+        from: match[1].trim(),
+        to: match[2].trim(),
+      };
+    }
   }
 
-  return {
-    from: match[1].trim(),
-    to: match[2].trim(),
-  };
+  return null;
 }
 
 function isBarePhraseCorrectionMarker(content: string): boolean {
