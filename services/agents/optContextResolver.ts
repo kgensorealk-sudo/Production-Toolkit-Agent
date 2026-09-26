@@ -1,7 +1,8 @@
-﻿import type { OptValidatorItem, OptValidatorResult } from '../xml/optValidator.js';
+import type { OptValidatorItem, OptValidatorResult } from '../xml/optValidator.js';
 
 export type OptContextResolutionStatus =
   | 'resolved'
+  | 'resolved-by-sibling-pattern'
   | 'duplicate'
   | 'ambiguous'
   | 'unresolved';
@@ -28,11 +29,17 @@ export interface OptContextResolverRequest {
     from: string;
     to: string;
   }>;
+  bareCandidates?: Array<{
+    order: number;
+    content: string;
+  }>;
 }
+
+const SIBLING_PATTERN_MIN_CLUSTER_SIZE = 3;
 
 function normalizeDash(value: string): string {
   return value
-    .replace(/[\u2012\u2013\u2014\u2212]/g, '–')
+    .replace(/[\u2012\u2013\u2014\u2212]/g, '\u2013')
     .replace(/[\u00AD]/g, '');
 }
 
@@ -47,7 +54,7 @@ function xmlToComparableText(xml: string): string {
     xml
       .replace(
         /<ce:glyph\b[^>]*name\s*=\s*"sbnd"[^>]*\/?>/gi,
-        '–'
+        '\u2013'
       )
       .replace(/<opt_[A-Za-z0-9_-]+(?:\s+[^>]*)?>[\s\S]*?<\/opt_[A-Za-z0-9_-]+\s*>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
@@ -273,6 +280,124 @@ function resolveComment(
   };
 }
 
+interface RequestedChangeCluster {
+  normalizedFrom: string;
+  normalizedTo: string;
+  from: string;
+  to: string;
+  count: number;
+  orders: number[];
+}
+
+/*
+ * Sibling-pattern clustering (Strategy A1). Groups explicit, already-resolved
+ * requestedChange pairs by their normalized (from, to) transformation.
+ * Same-file evidence only -- this function never sees more than one file's
+ * requestedChanges at a time, by construction of its caller.
+ */
+function buildRequestedChangeClusters(
+  requestedChanges: Array<{ order: number; from: string; to: string }>
+): RequestedChangeCluster[] {
+  const clusters = new Map<string, RequestedChangeCluster>();
+
+  for (const change of requestedChanges) {
+    const normalizedFrom = normalizeForMatching(change.from);
+    const normalizedTo = normalizeForMatching(change.to);
+    const key = `${normalizedFrom}\u241F${normalizedTo}`;
+
+    const existing = clusters.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      existing.orders.push(change.order);
+    } else {
+      clusters.set(key, {
+        normalizedFrom,
+        normalizedTo,
+        from: change.from,
+        to: change.to,
+        count: 1,
+        orders: [change.order],
+      });
+    }
+  }
+
+  return [...clusters.values()];
+}
+
+/*
+ * For a bare-phrase comment with no explicit "please change X to Y" wording,
+ * check whether its raw text matches the before-text of an in-file cluster
+ * of >= SIBLING_PATTERN_MIN_CLUSTER_SIZE confirmed explicit siblings sharing
+ * the exact same transformation. If exactly one such cluster matches (not
+ * zero, not more than one -- an impure/ambiguous match is never auto-applied),
+ * auto-populate the requestedChange from the cluster and locate the target
+ * text the same way explicit resolutions do.
+ *
+ * Scope boundary: this stays in the Resolver. It does not re-derive which
+ * items are bare-phrase candidates -- that categorization is the Interpreter's
+ * job; this function only receives what the caller already flagged as such.
+ */
+function resolveBareCandidateBySiblingPattern(
+  xml: string,
+  validation: OptValidatorResult,
+  candidate: { order: number; content: string },
+  clusters: RequestedChangeCluster[]
+): OptContextResolution | null {
+  const item = validation.items.find(
+    (candidateItem) => candidateItem.order === candidate.order
+  );
+
+  if (!item || item.type !== 'COMMENT') {
+    return null;
+  }
+
+  const normalizedCandidate = normalizeForMatching(candidate.content);
+
+  const matchingClusters = clusters.filter(
+    (cluster) => cluster.normalizedFrom === normalizedCandidate
+  );
+
+  if (matchingClusters.length !== 1) {
+    return null;
+  }
+
+  const cluster = matchingClusters[0];
+
+  if (cluster.count < SIBLING_PATTERN_MIN_CLUSTER_SIZE) {
+    return null;
+  }
+
+  const contextBack = 2000;
+  const contextFwd = 500;
+  const contextStart = Math.max(0, item.startOffset - contextBack);
+  const contextEnd = Math.min(xml.length, item.endOffset + contextFwd);
+  const context = xml.slice(contextStart, contextEnd);
+
+  const targetLocation = locateRequestedTarget(context, cluster.from);
+
+  if (!targetLocation) {
+    return null;
+  }
+
+  const targetXmlLocation = locateTargetXml(context, cluster.from);
+
+  return {
+    status: 'resolved-by-sibling-pattern',
+    commentOrder: item.order,
+    commentId: item.id,
+    requestedChange: {
+      from: cluster.from,
+      to: cluster.to,
+    },
+    targetXml: targetXmlLocation?.found ?? undefined,
+    targetText: targetLocation.found,
+    relatedItems: [item.order, ...cluster.orders],
+    reason:
+      `The bare-phrase comment ("${candidate.content}") matches the before-text of an in-file transformation ("${cluster.from}" to "${cluster.to}") confirmed by ${cluster.count} explicit sibling comments elsewhere in this same file. Auto-resolved via same-file sibling-pattern evidence, not a guess; requires glimpse confirmation before apply.`,
+  };
+}
+
 export function resolveOptCommentContext(
   request: OptContextResolverRequest
 ): OptContextResolution[] {
@@ -289,8 +414,22 @@ export function resolveOptCommentContext(
     );
   }
 
+  if (request.bareCandidates && request.bareCandidates.length > 0) {
+    const clusters = buildRequestedChangeClusters(request.requestedChanges);
+
+    for (const candidate of request.bareCandidates) {
+      const siblingResolution = resolveBareCandidateBySiblingPattern(
+        request.xml,
+        request.validation,
+        candidate,
+        clusters
+      );
+
+      if (siblingResolution) {
+        resolutions.push(siblingResolution);
+      }
+    }
+  }
+
   return resolutions;
 }
-
-
-
