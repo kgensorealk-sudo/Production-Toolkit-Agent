@@ -98,6 +98,7 @@
 - **Priority:** P1 (next code task after closing KB-001 P0)  
 - **Urgency:** THIS WEEK  
 - **File affected:** [optContextResolver.ts](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optContextResolver.ts) — `locateRequestedTarget()` lines 64–86, + `locateTargetXml()` lines 88–144
+- **Status:** **CLOSED 2026-09-26 via commit `ee75b1e` ("Fix KB-002: Resolver now picks nearest match to anchor, not last-found"), pushed to origin/main together with `tools/kb002-repro.ts`, a synthetic verification script. Added `anchorOffset` as an explicit parameter to both locate functions (previously computed but never passed down) plus a shared `pickNearestMatch()` helper: enumerates all occurrences, returns minimum-distance to anchor, backward-preferred on ties. Verified: encoding guard PASS, tsc 0 drift, kb001-repro.ts still exits 0 (no regression), testOptChain.ts harness numbers unchanged (CEJ_182103 has no natural multi-match case to exercise this), and the new kb002-repro.ts exits 0 confirming a near-backward (50 chars) occurrence is correctly selected over a far-forward (400 chars) one.**
 
 **Description:** When locating a literal target text like `Pr—Co` inside the 2000-back / 500-forward context window, `locateRequestedTarget` uses a single `lastIndexOf(normalizedFrom)` call at line 75. `lastIndexOf` returns the LAST occurrence of the string in the entire 2500-character context — this is the one FURTHEST AWAY from the comment anchor in the forward direction, not the closest one. The code then calculates a `targetDistance` (lines 263–265) between anchorOffset and the returned match, but this distance is used for the REASON STRING ONLY, never for SELECTING which match to keep. Similarly, `locateTargetXml` uses `new RegExp(…, 'gi').exec(source)` at L132 — `.exec()` with the `g` flag returns the FIRST match found, which is also NOT necessarily the nearest to the anchor.
 
@@ -107,11 +108,16 @@
 
 **Impact:** Wrong-location XML mutations (once Executor ships). Wrong "Nearest match located N chars" strings in decision reasons today (cosmetic lie).
 
-**Steps to reproduce artificially:**
+**Steps to reproduce artificially:** *(correction added at close-out 2026-09-26: the two-backward-occurrence example below does not actually reproduce the bug -- for two purely backward occurrences, lastIndexOf already returns the nearer one, since nearer-to-anchor means higher string index within a backward-only window. The real failure mode is backward-vs-forward: a forward occurrence always has a higher index than any backward one, so a distant forward match could beat a close backward one. See tools/kb002-repro.ts for the corrected, verified reproduction.)*
 ```ts
+// ORIGINAL (imprecise) illustrative example, kept for reference:
 // context has two occurrences: one 100 chars BEFORE anchor, one 1900 chars BEFORE anchor
-// lastIndexOf today returns the 1900-before occurrence (furthest!)
-// correct behavior returns the 100-before occurrence (nearest!)
+// lastIndexOf on a purely-backward pair actually already returns the nearer (100-before) one.
+
+// ACTUAL reproducible case (see tools/kb002-repro.ts):
+// one occurrence ~50 chars BEFORE anchor, one occurrence ~400 chars AFTER anchor
+// lastIndexOf/exec()-first wrongly prefer the farther forward occurrence
+// pickNearestMatch correctly selects the 50-char backward occurrence
 ```
 
 **Fix:**
@@ -121,9 +127,9 @@
 4. In locateTargetXml, after `exec()` first match, call `exec()` in a while loop to collect all matches, then apply same argmin distance selection.
 5. Add unit-ad-hoc test with the artificial case from steps above.
 
-**Verification:** CEJ_182103 numbers on Resolver (23/2/1) unchanged — it just picks the same occurrence (lucky). Artificial multi-match case picks correct closest occurrence.
+**Verification:** CEJ_182103 numbers on Resolver (23/2/1) confirmed unchanged post-fix (no natural multi-match case in this file). Synthetic near-backward-vs-far-forward case in tools/kb002-repro.ts confirms the nearest (50-char) occurrence is selected over the farther (400-char) one -- exit code 0.
 
-**Estimated effort:** 1–2 hours + synthetic tests.
+**Estimated effort:** 1–2 hours + synthetic tests. (Actual: ~1 hour including the full-file rewrite, synthetic repro script, and verification chain.)
 
 ---
 
@@ -308,6 +314,7 @@ Actual pattern strings on lines 31–32 (`'â€”'` / `'â€“'`) are correc
 - **Priority:** P3 (closes with KB-002)
 - **Urgency:** EVENTUAL
 - **Same file as KB-002:** locateTargetXml. `new RegExp(escaped, 'gi').exec(source)` at line 132 returns the first regex match in the string, not nearest to anchorOffset. Same root-cause class as locateRequestedTarget lastIndexOf. Part of same fix (iterate all matches, pick nearest). Mark closed when KB-002 fix lands.
+- **Status:** **CLOSED 2026-09-26 together with KB-002, commit `ee75b1e`. locateTargetXml's glyph-pattern and literal-pattern branches both now collect all matches via a while loop and select via the shared pickNearestMatch() helper, same as locateRequestedTarget.**
 
 ---
 
