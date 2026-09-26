@@ -1,4 +1,4 @@
-﻿import { cleanXmlTags, XmlTagCleanAction } from '../xml/xmlTagCleaner.js';
+import { cleanXmlTags, XmlTagCleanAction } from '../xml/xmlTagCleaner.js';
 import {
   analyzeProductionIssue,
   ProductionQaResult
@@ -63,9 +63,14 @@ function runOptChain(xml: string): OptChainResult | { error: string } {
 
     const interpretation = interpretOptMarkup({ validation });
 
-    // Same assembly logic as tools/testOptChain.ts: only xml-correction
+    // Same assembly logic as tools/testOptChain.ts: xml-correction
     // interpretations that carry an explicit requestedChange go to the
-    // Context Resolver.
+    // Context Resolver as requestedChanges; xml-correction interpretations
+    // flagged human-review with NO requestedChange (bare-phrase markers) go
+    // as bareCandidates, so the Resolver's sibling-pattern post-pass can see
+    // them too. KB-001 fix: this array was previously never built here,
+    // making the sibling resolver dead code in the real pipeline even
+    // though it worked correctly in the tools/testOptChain.ts harness.
     const requestedChanges = interpretation.interpretations
       .filter((interp) => interp.category === 'xml-correction' && interp.requestedChange)
       .map((interp) => ({
@@ -74,10 +79,25 @@ function runOptChain(xml: string): OptChainResult | { error: string } {
         to: interp.requestedChange!.to,
       }));
 
+    const bareCandidates = interpretation.interpretations
+      .filter(
+        (interp) =>
+          interp.category === 'xml-correction' &&
+          interp.action === 'human-review' &&
+          !interp.requestedChange
+      )
+      .map((interp) => {
+        const order = interp.relatedItems[0];
+        const item = validation.items.find((candidate) => candidate.order === order);
+        return item ? { order, content: item.content } : null;
+      })
+      .filter((candidate): candidate is { order: number; content: string } => candidate !== null);
+
     const resolutions = resolveOptCommentContext({
       xml,
       validation,
       requestedChanges,
+      bareCandidates,
     });
 
     const resolutionByOrder = new Map<number, OptContextResolution>();
@@ -87,7 +107,12 @@ function runOptChain(xml: string): OptChainResult | { error: string } {
 
     const decisions: KeeperDecisionOutcome[] = interpretation.interpretations.map((interp) => {
       const order = interp.relatedItems[0];
-      const resolution = interp.requestedChange ? resolutionByOrder.get(order) : undefined;
+      // KB-001 fix: unconditional fetch. Resolver keys resolutions by
+      // commentOrder regardless of whether the interpretation carried an
+      // explicit requestedChange -- bareCandidates resolve into the same
+      // map. decideOptItem already handles resolution === undefined via
+      // its fallback branch, so this is safe for every other category.
+      const resolution = resolutionByOrder.get(order);
       return decideOptItem({ interpretation: interp, resolution });
     });
 
