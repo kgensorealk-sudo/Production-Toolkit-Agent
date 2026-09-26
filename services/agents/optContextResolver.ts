@@ -54,10 +54,10 @@ function xmlToComparableText(xml: string): string {
   );
 }
 
-function extractRequestedTarget(
+function locateRequestedTarget(
   source: string,
   requestedFrom: string
-): string | null {
+): { found: string; startRel: number; endRel: number } | null {
   const normalizedSource = xmlToComparableText(source);
   const normalizedFrom = normalizeForMatching(requestedFrom);
 
@@ -65,19 +65,23 @@ function extractRequestedTarget(
     return null;
   }
 
-  const position = normalizedSource.lastIndexOf(normalizedFrom);
+  const startRel = normalizedSource.lastIndexOf(normalizedFrom);
 
-  if (position < 0) {
+  if (startRel < 0) {
     return null;
   }
 
-  return normalizedFrom;
+  return {
+    found: normalizedFrom,
+    startRel,
+    endRel: startRel + normalizedFrom.length,
+  };
 }
 
-function extractTargetXml(
+function locateTargetXml(
   source: string,
   requestedFrom: string
-): string | null {
+): { found: string; startRel: number; endRel: number } | null {
   const normalizedFrom = normalizeForMatching(requestedFrom);
 
   if (!normalizedFrom) {
@@ -105,7 +109,11 @@ function extractTargetXml(
     const glyphMatch = glyphPattern.exec(source);
 
     if (glyphMatch) {
-      return glyphMatch[0];
+      return {
+        found: glyphMatch[0],
+        startRel: glyphMatch.index,
+        endRel: glyphMatch.index + glyphMatch[0].length,
+      };
     }
   }
 
@@ -118,7 +126,11 @@ function extractTargetXml(
   const literalMatch = literalPattern.exec(source);
 
   if (literalMatch) {
-    return literalMatch[0];
+    return {
+      found: literalMatch[0],
+      startRel: literalMatch.index,
+      endRel: literalMatch.index + literalMatch[0].length,
+    };
   }
 
   return null;
@@ -209,15 +221,19 @@ function resolveComment(
     }
   }
 
-  const contextStart = Math.max(0, item.startOffset - 500);
-  const context = xml.slice(contextStart, item.startOffset);
+  const contextBack = 2000;
+  const contextFwd = 500;
+  const contextStart = Math.max(0, item.startOffset - contextBack);
+  const contextEnd = Math.min(xml.length, item.endOffset + contextFwd);
+  const context = xml.slice(contextStart, contextEnd);
+  const anchorOffset = item.startOffset - contextStart;
 
-  const targetText = extractRequestedTarget(
+  const targetLocation = locateRequestedTarget(
     context,
     request.from
   );
 
-  if (!targetText) {
+  if (!targetLocation) {
     return {
       status: 'unresolved',
       commentOrder: item.order,
@@ -228,14 +244,18 @@ function resolveComment(
       },
       relatedItems: [item.order],
       reason:
-        `The requested source text "${request.from}" could not be reliably located in the XML context immediately preceding the comment.`,
+        `The requested source text "${request.from}" could not be reliably located in the XML context surrounding the comment (${contextBack} chars before / ${contextFwd} chars after).`,
     };
   }
 
-  const targetXml = extractTargetXml(
+  const targetXmlLocation = locateTargetXml(
     context,
     request.from
   );
+
+  const targetDistance = targetLocation.endRel <= anchorOffset
+    ? anchorOffset - targetLocation.endRel
+    : targetLocation.startRel - anchorOffset;
 
   return {
     status: 'resolved',
@@ -245,11 +265,11 @@ function resolveComment(
       from: request.from,
       to: request.to,
     },
-    targetXml: targetXml ?? undefined,
-    targetText,
+    targetXml: targetXmlLocation?.found ?? undefined,
+    targetText: targetLocation.found,
     relatedItems: [item.order],
     reason:
-      `The requested source text "${request.from}" was found in the XML context immediately preceding the comment.`,
+      `The requested source text "${request.from}" was found in the XML context surrounding the comment (${contextBack} chars before / ${contextFwd} chars after). Nearest match located ~${targetDistance} chars from the OPT marker.`,
   };
 }
 
