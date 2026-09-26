@@ -61,9 +61,55 @@ function xmlToComparableText(xml: string): string {
   );
 }
 
+interface OffsetMatch {
+  found: string;
+  startRel: number;
+  endRel: number;
+}
+
+/*
+ * KB-002 fix: pick the match nearest to the OPT comment anchor, not simply
+ * the last one found. Ties (identical distance forward vs. backward) prefer
+ * the backward occurrence, matching the original code's implicit bias
+ * (lastIndexOf favored later-in-string matches, which for purely-backward
+ * context windows meant "closer to the anchor" -- but broke down once a
+ * forward window was added in the 2000/500 fix, and always broke down for
+ * cases with 2+ backward occurrences).
+ */
+function pickNearestMatch(
+  matches: OffsetMatch[],
+  anchorOffset: number
+): OffsetMatch | null {
+  if (matches.length === 0) {
+    return null;
+  }
+
+  let best = matches[0];
+  let bestDistance = Math.abs(best.startRel - anchorOffset);
+
+  for (let i = 1; i < matches.length; i++) {
+    const candidate = matches[i];
+    const distance = Math.abs(candidate.startRel - anchorOffset);
+
+    const strictlyCloser = distance < bestDistance;
+    const tiedButBackwardPreferred =
+      distance === bestDistance &&
+      candidate.startRel < anchorOffset &&
+      !(best.startRel < anchorOffset);
+
+    if (strictlyCloser || tiedButBackwardPreferred) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+
+  return best;
+}
+
 function locateRequestedTarget(
   source: string,
-  requestedFrom: string
+  requestedFrom: string,
+  anchorOffset: number
 ): { found: string; startRel: number; endRel: number } | null {
   const normalizedSource = xmlToComparableText(source);
   const normalizedFrom = normalizeForMatching(requestedFrom);
@@ -72,22 +118,32 @@ function locateRequestedTarget(
     return null;
   }
 
-  const startRel = normalizedSource.lastIndexOf(normalizedFrom);
+  const matches: OffsetMatch[] = [];
+  let searchFrom = 0;
 
-  if (startRel < 0) {
-    return null;
+  while (true) {
+    const idx = normalizedSource.indexOf(normalizedFrom, searchFrom);
+
+    if (idx < 0) {
+      break;
+    }
+
+    matches.push({
+      found: normalizedFrom,
+      startRel: idx,
+      endRel: idx + normalizedFrom.length,
+    });
+
+    searchFrom = idx + 1;
   }
 
-  return {
-    found: normalizedFrom,
-    startRel,
-    endRel: startRel + normalizedFrom.length,
-  };
+  return pickNearestMatch(matches, anchorOffset);
 }
 
 function locateTargetXml(
   source: string,
-  requestedFrom: string
+  requestedFrom: string,
+  anchorOffset: number
 ): { found: string; startRel: number; endRel: number } | null {
   const normalizedFrom = normalizeForMatching(requestedFrom);
 
@@ -113,14 +169,25 @@ function locateTargetXml(
       'gi'
     );
 
-    const glyphMatch = glyphPattern.exec(source);
+    const glyphMatches: OffsetMatch[] = [];
+    let glyphMatch: RegExpExecArray | null;
 
-    if (glyphMatch) {
-      return {
+    while ((glyphMatch = glyphPattern.exec(source)) !== null) {
+      glyphMatches.push({
         found: glyphMatch[0],
         startRel: glyphMatch.index,
         endRel: glyphMatch.index + glyphMatch[0].length,
-      };
+      });
+
+      if (glyphMatch[0].length === 0) {
+        glyphPattern.lastIndex += 1;
+      }
+    }
+
+    const nearestGlyph = pickNearestMatch(glyphMatches, anchorOffset);
+
+    if (nearestGlyph) {
+      return nearestGlyph;
     }
   }
 
@@ -130,17 +197,22 @@ function locateTargetXml(
   );
 
   const literalPattern = new RegExp(escaped, 'gi');
-  const literalMatch = literalPattern.exec(source);
+  const literalMatches: OffsetMatch[] = [];
+  let literalMatch: RegExpExecArray | null;
 
-  if (literalMatch) {
-    return {
+  while ((literalMatch = literalPattern.exec(source)) !== null) {
+    literalMatches.push({
       found: literalMatch[0],
       startRel: literalMatch.index,
       endRel: literalMatch.index + literalMatch[0].length,
-    };
+    });
+
+    if (literalMatch[0].length === 0) {
+      literalPattern.lastIndex += 1;
+    }
   }
 
-  return null;
+  return pickNearestMatch(literalMatches, anchorOffset);
 }
 
 function getPreviousItem(
@@ -237,7 +309,8 @@ function resolveComment(
 
   const targetLocation = locateRequestedTarget(
     context,
-    request.from
+    request.from,
+    anchorOffset
   );
 
   if (!targetLocation) {
@@ -257,7 +330,8 @@ function resolveComment(
 
   const targetXmlLocation = locateTargetXml(
     context,
-    request.from
+    request.from,
+    anchorOffset
   );
 
   const targetDistance = targetLocation.endRel <= anchorOffset
@@ -373,14 +447,15 @@ function resolveBareCandidateBySiblingPattern(
   const contextStart = Math.max(0, item.startOffset - contextBack);
   const contextEnd = Math.min(xml.length, item.endOffset + contextFwd);
   const context = xml.slice(contextStart, contextEnd);
+  const anchorOffset = item.startOffset - contextStart;
 
-  const targetLocation = locateRequestedTarget(context, cluster.from);
+  const targetLocation = locateRequestedTarget(context, cluster.from, anchorOffset);
 
   if (!targetLocation) {
     return null;
   }
 
-  const targetXmlLocation = locateTargetXml(context, cluster.from);
+  const targetXmlLocation = locateTargetXml(context, cluster.from, anchorOffset);
 
   return {
     status: 'resolved-by-sibling-pattern',
