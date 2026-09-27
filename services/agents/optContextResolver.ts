@@ -10,6 +10,8 @@ export type OptContextResolutionStatus =
 export interface OptContextResolution {
   status: OptContextResolutionStatus;
   commentOrder: number;
+  commentIds: number[];
+  groupId?: string | null;
   commentId?: string;
   requestedChange?: {
     from: string;
@@ -17,6 +19,8 @@ export interface OptContextResolution {
   };
   targetXml?: string;
   targetText?: string;
+  targetStartOffset?: number;
+  targetEndOffset?: number;
   relatedItems: number[];
   reason: string;
 }
@@ -49,16 +53,75 @@ function normalizeForMatching(value: string): string {
     .trim();
 }
 
-function xmlToComparableText(xml: string): string {
-  return normalizeForMatching(
-    xml
-      .replace(
-        /<ce:glyph\b[^>]*name\s*=\s*"sbnd"[^>]*\/?>/gi,
-        '\u2013'
-      )
-      .replace(/<opt_[A-Za-z0-9_-]+(?:\s+[^>]*)?>[\s\S]*?<\/opt_[A-Za-z0-9_-]+\s*>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-  );
+interface ComparableText {
+  text: string;
+  rawOffsetAt: number[];
+}
+
+function xmlToComparableText(xml: string): ComparableText {
+  let text = '';
+  const rawOffsetAt: number[] = [];
+  const n = xml.length;
+  let i = 0;
+
+  const emit = (ch: string, rawIndex: number) => {
+    text += ch;
+    rawOffsetAt.push(rawIndex);
+  };
+
+  while (i < n) {
+    const rest = xml.slice(i);
+
+    const glyphMatch = /^<ce:glyph\b[^>]*name\s*=\s*"sbnd"[^>]*\/?>/i.exec(rest);
+    if (glyphMatch) {
+      emit('\u2013', i);
+      i += glyphMatch[0].length;
+      continue;
+    }
+
+    const optBlockMatch = /^<opt_[A-Za-z0-9_-]+(?:\s+[^>]*)?>[\s\S]*?<\/opt_[A-Za-z0-9_-]+\s*>/i.exec(rest);
+    if (optBlockMatch) {
+      emit(' ', i);
+      i += optBlockMatch[0].length;
+      continue;
+    }
+
+    const tagMatch = /^<[^>]+>/.exec(rest);
+    if (tagMatch) {
+      emit(' ', i);
+      i += tagMatch[0].length;
+      continue;
+    }
+
+    const ch = xml[i];
+
+    if (/[\u2012\u2013\u2014\u2212]/.test(ch)) {
+      emit('\u2013', i);
+      i += 1;
+      continue;
+    }
+
+    if (ch === '\u00AD') {
+      i += 1;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      emit(' ', i);
+      i += 1;
+      while (i < n && /\s/.test(xml[i])) {
+        i += 1;
+      }
+      continue;
+    }
+
+    emit(ch, i);
+    i += 1;
+  }
+
+  rawOffsetAt.push(n);
+
+  return { text, rawOffsetAt };
 }
 
 interface OffsetMatch {
@@ -111,7 +174,7 @@ function locateRequestedTarget(
   requestedFrom: string,
   anchorOffset: number
 ): { found: string; startRel: number; endRel: number } | null {
-  const normalizedSource = xmlToComparableText(source);
+  const { text: normalizedSource, rawOffsetAt } = xmlToComparableText(source);
   const normalizedFrom = normalizeForMatching(requestedFrom);
 
   if (!normalizedFrom) {
@@ -130,8 +193,8 @@ function locateRequestedTarget(
 
     matches.push({
       found: normalizedFrom,
-      startRel: idx,
-      endRel: idx + normalizedFrom.length,
+      startRel: rawOffsetAt[idx],
+      endRel: rawOffsetAt[idx + normalizedFrom.length],
     });
 
     searchFrom = idx + 1;
@@ -252,6 +315,8 @@ function resolveComment(
 
   if (!item || item.type !== 'COMMENT') {
     return {
+      commentIds: [request.order],
+      groupId: undefined,
       status: 'unresolved',
       commentOrder: request.order,
       requestedChange: {
@@ -286,6 +351,8 @@ function resolveComment(
 
     if (sameRequestedChange) {
       return {
+        commentIds: [item.order],
+        groupId: undefined,
         status: 'duplicate',
         commentOrder: item.order,
         commentId: item.id,
@@ -315,6 +382,8 @@ function resolveComment(
 
   if (!targetLocation) {
     return {
+      commentIds: [item.order],
+      groupId: undefined,
       status: 'unresolved',
       commentOrder: item.order,
       commentId: item.id,
@@ -339,6 +408,8 @@ function resolveComment(
     : targetLocation.startRel - anchorOffset;
 
   return {
+    commentIds: [item.order],
+    groupId: undefined,
     status: 'resolved',
     commentOrder: item.order,
     commentId: item.id,
@@ -348,6 +419,8 @@ function resolveComment(
     },
     targetXml: targetXmlLocation?.found ?? undefined,
     targetText: targetLocation.found,
+    targetStartOffset: contextStart + targetLocation.startRel,
+    targetEndOffset: contextStart + targetLocation.endRel,
     relatedItems: [item.order],
     reason:
       `The requested source text "${request.from}" was found in the XML context surrounding the comment (${contextBack} chars before / ${contextFwd} chars after). Nearest match located ~${targetDistance} chars from the OPT marker.`,
@@ -458,6 +531,8 @@ function resolveBareCandidateBySiblingPattern(
   const targetXmlLocation = locateTargetXml(context, cluster.from, anchorOffset);
 
   return {
+    commentIds: [item.order],
+    groupId: undefined,
     status: 'resolved-by-sibling-pattern',
     commentOrder: item.order,
     commentId: item.id,
@@ -467,6 +542,8 @@ function resolveBareCandidateBySiblingPattern(
     },
     targetXml: targetXmlLocation?.found ?? undefined,
     targetText: targetLocation.found,
+    targetStartOffset: contextStart + targetLocation.startRel,
+    targetEndOffset: contextStart + targetLocation.endRel,
     relatedItems: [item.order, ...cluster.orders],
     reason:
       `The bare-phrase comment ("${candidate.content}") matches the before-text of an in-file transformation ("${cluster.from}" to "${cluster.to}") confirmed by ${cluster.count} explicit sibling comments elsewhere in this same file. Auto-resolved via same-file sibling-pattern evidence, not a guess; requires glimpse confirmation before apply.`,

@@ -34,6 +34,8 @@ function decideReplacementPair(
 ): KeeperDecisionOutcome {
   return {
     order: interpretation.relatedItems[0],
+    commentIds: [interpretation.relatedItems[0]],
+    groupId: undefined,
     decision: 'apply',
     status: 'ready',
     confidence: interpretation.confidence,
@@ -58,6 +60,8 @@ function decideCommentCorrection(
     case 'resolved-by-sibling-pattern':
       return {
         order,
+        commentIds: [order],
+        groupId: undefined,
         decision: 'apply',
         status: 'ready',
         confidence: interpretation.confidence,
@@ -70,6 +74,8 @@ function decideCommentCorrection(
     case 'duplicate':
       return {
         order,
+        commentIds: [order],
+        groupId: undefined,
         decision: 'no-action',
         status: 'blocked',
         confidence: interpretation.confidence,
@@ -84,6 +90,8 @@ function decideCommentCorrection(
     default:
       return {
         order,
+        commentIds: [order],
+        groupId: undefined,
         decision: 'human-review',
         status:
           resolution.status === 'ambiguous' ? 'ambiguous' : 'unresolved',
@@ -101,6 +109,8 @@ function decideSupplementaryOrExternalChange(
 ): KeeperDecisionOutcome {
   return {
     order: interpretation.relatedItems[0],
+    commentIds: [interpretation.relatedItems[0]],
+    groupId: undefined,
     decision: 'hold-for-jm',
     status: 'blocked',
     confidence: interpretation.confidence,
@@ -116,6 +126,8 @@ function decideFallback(
 ): KeeperDecisionOutcome {
   return {
     order: interpretation.relatedItems[0] ?? -1,
+    commentIds: [interpretation.relatedItems[0] ?? -1],
+    groupId: undefined,
     decision: 'human-review',
     status: 'unresolved',
     confidence: interpretation.confidence,

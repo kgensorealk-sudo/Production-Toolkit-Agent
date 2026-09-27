@@ -9,7 +9,7 @@
  * or the evidence needed to act is missing, the item is reported as an error and
  * the XML is left untouched there -- the executor never invents a decision.
  *
- * NOTE ON INPUT SHAPE: project-decision-brief.md § Priority 4 describes the executor
+ * NOTE ON INPUT SHAPE: project-decision-brief.md ┬º Priority 4 describes the executor
  * as consuming `{ xmlString, decisions }` only. In practice KeeperDecisionOutcome does
  * not carry the resolved replacement text, its position, or which OptValidatorItem(s)
  * it maps to -- that evidence lives in OptContextResolution / OptInterpretation /
@@ -41,6 +41,7 @@ export type ExecutorItemOutcome = 'applied' | 'skipped' | 'error';
 
 export interface KeeperExecutionItemReport {
   order: number;
+  commentIds: number[];
   decision: KeeperDecisionOutcome['decision'];
   outcome: ExecutorItemOutcome;
   detail: string;
@@ -254,11 +255,12 @@ export function executeKeeperDecisions(request: ExecutorRequest): ExecutorResult
 
   const itemReports: KeeperExecutionItemReport[] = [];
   const acceptedEdits: PlannedEdit[] = [];
-  const claimedSpans: Array<{ start: number; end: number; order: number }> = [];
+  const claimedSpans: Array<{ start: number; end: number; order: number; commentIds: number[] }> = [];
 
   for (const decision of request.decisions) {
     if (decision.decision === 'hold-for-jm' || decision.decision === 'human-review') {
       itemReports.push({
+        commentIds: decision.commentIds ?? [decision.order],
         order: decision.order,
         decision: decision.decision,
         outcome: 'skipped',
@@ -271,6 +273,7 @@ export function executeKeeperDecisions(request: ExecutorRequest): ExecutorResult
 
     if (!interpretation) {
       itemReports.push({
+        commentIds: decision.commentIds ?? [decision.order],
         order: decision.order,
         decision: decision.decision,
         outcome: 'error',
@@ -283,11 +286,11 @@ export function executeKeeperDecisions(request: ExecutorRequest): ExecutorResult
     const planned = planEditsForDecision(decision, interpretation, resolution, itemsByOrder);
 
     if ('error' in planned) {
-      itemReports.push({ order: decision.order, decision: decision.decision, outcome: 'error', detail: planned.error });
+      itemReports.push({ commentIds: decision.commentIds ?? [decision.order], order: decision.order, decision: decision.decision, outcome: 'error', detail: planned.error });
       continue;
     }
 
-    let conflict: { candidate: PlannedEdit; claimed: { start: number; end: number; order: number } } | undefined;
+    let conflict: { candidate: PlannedEdit; claimed: { start: number; end: number; order: number; commentIds: number[] } } | undefined;
 
     for (const candidate of planned.edits) {
       const claimed = claimedSpans.find(
@@ -301,6 +304,7 @@ export function executeKeeperDecisions(request: ExecutorRequest): ExecutorResult
 
     if (conflict) {
       itemReports.push({
+        commentIds: decision.commentIds ?? [decision.order],
         order: decision.order,
         decision: decision.decision,
         outcome: 'error',
@@ -310,12 +314,13 @@ export function executeKeeperDecisions(request: ExecutorRequest): ExecutorResult
     }
 
     for (const edit of planned.edits) {
-      claimedSpans.push({ start: edit.start, end: edit.end, order: decision.order });
+      claimedSpans.push({ start: edit.start, end: edit.end, order: decision.order, commentIds: decision.commentIds ?? [decision.order] });
     }
 
     acceptedEdits.push(...planned.edits);
 
     itemReports.push({
+      commentIds: decision.commentIds ?? [decision.order],
       order: decision.order,
       decision: decision.decision,
       outcome: 'applied',

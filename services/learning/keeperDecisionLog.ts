@@ -33,7 +33,9 @@ export type KeeperHumanOutcome =
 export interface KeeperLoggedDecision {
   sessionId: string;
   fileHash: string;
-  commentOrder: number;
+  commentOrder: number;      // legacy: always === commentIds[0] for non-grouped; deprecated 1 release
+  commentIds: number[];            // required, 1-element for non-grouped, N-element for grouped
+  groupId?: string | null;         // Grouping doc groupId, or null/undefined if not grouped
   commentTextNorm: string;
   evidenceSource: KeeperEvidenceSource;
   decision: KeeperDecisionAction;

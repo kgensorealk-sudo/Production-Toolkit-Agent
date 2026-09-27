@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Keeper Decision
  *
  * Shared decision contract between the OPT reasoning chain
@@ -22,7 +22,9 @@ export type KeeperDecisionStatus =
   | 'unresolved';
 
 export interface KeeperDecisionOutcome {
-  order: number;
+  order: number;                  // legacy: always === commentIds[0] for non-grouped; deprecated 1 release
+  commentIds: number[];             // required, 1-element for non-grouped, N-element for grouped
+  groupId?: string | null;          // Grouping doc groupId, or null/undefined if not grouped
   decision: KeeperDecisionAction;
   status: KeeperDecisionStatus;
   confidence: 'high' | 'medium' | 'low';
