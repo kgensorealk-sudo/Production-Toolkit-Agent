@@ -37,3 +37,5 @@ Thumbs.db
 # --- TypeScript build info ---
 *.tsbuildinfo
 docs/tsc-check-current.txt
+tools/output/
+docs/*-current.txt
