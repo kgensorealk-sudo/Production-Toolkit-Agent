@@ -87,7 +87,7 @@ Examples of WRONG command request (never use these):
    ```powershell
    npx.cmd tsx tools/testOptChain.ts
    ```
-   Expected output (updated 2026-09-26 after NEXT STEP 2 + NEXT STEP 3, commits 77e8559 / 31f538a / 17e6057 / 51bb916):
+   Expected output (verified 2026-09-26 commit a47b92c A4 FULL complete + NEXT STEP 3 (A1 sibling resolver) fully complete):
    ```
    Validator:    29 items total (27 COMMENT, 1 DEL, 1 INS)
    Interpreter:  28 interpretations (DEL/INS pair collapses to 1 replacement interpretation)
@@ -97,6 +97,7 @@ Examples of WRONG command request (never use these):
    Decision:     25 apply, 0 human-review, 2 no-action, 1 hold-for-jm
                  (by status: 25 ready, 3 blocked)
    ```
+   > Historical note: KB-001 (resolver not called from runOptChain) closed 2026-09-26 commit e3216a1; both entry points agree per kb001-repro.ts exit 0.
 
    If any of a/b/c deviate, stop. The repo is not in known-good state. Re-read live files before proceeding. Do not trust prose in any document — trust live file content + command output.
 
@@ -147,11 +148,13 @@ Examples of WRONG command request (never use these):
 | 0.4 OPT chain wired into pipeline | ✅ DONE | `productionPipeline.ts` imports + runs full 4-stage chain against raw `request.xml`; result.optChain field present; `optChain.validation.total === 29` on CEJ file. Run `npx.cmd tsx tools/verifyOptChainPipeline.ts` to re-verify. |
 | 0.5 Duplicate affiliation routes removed | ✅ DONE | Grep `App.tsx` for `affiliationIdSequencer\|affiliation-id-normalizer` → zero matches. Only `/affiliationSequencer` remains. |
 
-**Chain results on real CEJ_182103.xml (known-good numbers, use as regression check; updated 2026-09-26 after NEXT STEP 2 + NEXT STEP 3):**
+**Chain results on real CEJ_182103.xml (known-good test-harness numbers, use as harness regression check; verified 2026-09-26 commit a47b92c A4 FULL complete + A1 Sibling Resolver FULLY complete):**
 - Validator: 29 items
-- Interpreter: 28 interpretations (27 xml-correction, 0 unknown, 1 external-file-change) -- NEXT STEP 2 (commit 77e8559) converted the last unknown item.
-- Resolver: 23 resolved, 2 duplicate, 1 resolved-by-sibling-pattern (commit 31f538a), 0 ambiguous
-- Decision: 25 apply, 0 human-review, 2 no-action, 1 hold-for-jm -- the former bare-phrase Pr—Co human-review item (order 10) now applies via same-file sibling-pattern evidence (commits 31f538a / 17e6057 / 51bb916), requiresGlimpse=true.
+- Interpreter: 28 interpretations (27 xml-correction, 0 unknown, 1 external-file-change) — A4 complete (curly-quote norm + single-quote/backtick norm + arrow-token norm + 5 quoted patterns + 5 bare anchored patterns covering Replace/Update/Swap/Change/verb-less-arrow).
+- Resolver: 23 resolved, 2 duplicate, 1 resolved-by-sibling-pattern, 0 ambiguous
+- Decision: 25 apply, 0 human-review, 2 no-action, 1 hold-for-jm — bare-phrase Pr—Co (order 10) now applies via same-file sibling-pattern evidence (A1), requiresGlimpse=true.
+
+Historical note: KB-001 divergence fixed 2026-09-26 commit e3216a1. Validator 29 / Interpreter 28 / Resolver 26 / Decision 25·0·2·1 baseline now byte-identical between test harness and pipeline entry.
 
 **Provider/model config:** `CANDIDATE_MODELS` in `keeperEngine.ts` = OpenAI (gpt-4o, gpt-4o-mini) primary, Gemini Flash-family (gemini-3.8-flash, gemini-3.1-flash-lite, gemini-flash-latest, gemini-3.7-flash) free-tier fallback only. Anthropic removed (no SDK client existed; dead code). Gemini Pro removed (left free tier Apr 2026).
 
@@ -217,38 +220,23 @@ Reconciled from [project-decision-brief.md § 6a](file:///c:/Users/Kevin/Desktop
 
 ---
 
-### **NEXT STEP 2 — Strategy A4: Expand Interpreter Instruction-Phrase Patterns** -- DONE (commit 77e8559; completed out of order relative to NEXT STEP 1, which was blocked -- see above)
+### **NEXT STEP 2 — Strategy A4: Expand Interpreter Instruction-Phrase Patterns** -- **DONE** (commit `a47b92c feat(interpreter): complete NEXT STEP 2 (A4) phrase-pattern expansion; merged to HEAD; re-verified 2026-09-26 against live `optInterpreter.ts` via Select-String quotedPatterns/barePatterns + live code section below)
 
-**Goal:** Convert 1–3 currently-`unknown` items per file into explicit `requestedChange`s. Real humans write "X→Y" instructions in many literal forms; Interpreter only catches 1 regex today.
+**What was built (cross-reference against live files to re-verify in 20 seconds):**
+- Location: `services/agents/optInterpreter.ts` → function `extractRequestedChange()` lines 91–142.
+- Pre-normalization chain (4 quote classes → ASCII equivalents; arrows → literal word `to`):
+  - L94–99: curly doubles `\u201c`/`\u201d` → ASCII `"`; curly singles `\u2018`/`\u2019` → ASCII `'`; backticks `` ` `` → ASCII `'`.
+  - L103: arrow normalization → 3 arrow tokens (U+2192 `→`, U+21D2 `⇒`, ASCII 2-char `->`) surrounded by any whitespace → literal ` to `.
+- QUOTED pattern list L112–118: 5 regexes — change, Replace with, Update to, Swap for, verb-less arrow-derived QUOTED-token pair.
+- BARE pattern list L123–128: 5 ^...$ anchored regexes for the same 5 shapes — anchor so "Pr to Co" without quotes — exactly the same token vocabulary without quotes never fire in longer sentences.
+- L131 loop iterates quotedPatterns first, then bare, first match returns `{from, to}`.
 
-**Where:** `services/agents/optInterpreter.ts` → function `extractRequestedChange()` currently at [lines 98–100](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optInterpreter.ts#L98-L100) (re-read for exact current line numbers before editing).
+**Why this doesn't produce delta on the CEJ regression file:** 27 of the 27 comments on this specific file already use a phrasing shape that the original single `please change "X" to "Y"` regex already matched. The 10-pattern, 4-normalizer build still matters critically for other files (CBD_102008's 9 real comments, all future manuscripts) where editors use different phrasing. Lack of delta on CEJ is the exact expected outcome, not evidence the work is ineffective.
 
-**Current single regex:**
-```
-/please\s+change\s+"([^"]+)"\s+to\s+"([^"]+)"/i
-```
-
-**Replace with ordered list of 6–8 patterns. Tried in sequence; first match wins.** Non-goal: no fuzziness. Every pattern must still unambiguously extract left=original, right=replacement.
-
-**Patterns to add (exact literal syntactic variants only):**
-1. No-quote variant (when tokens are self-delimiting): `please change X to Y` / `Change X to Y.`
-2. Verb synonyms: `Replace "X" with "Y"` / `Update "X" to "Y"` / `Swap "X" for "Y"`
-3. Unicode arrow variants: `"X" → "Y"` (U+2192), `"X" -> "Y"` (ASCII arrow)
-4. Quote-delimiter variants: single-quote `'X' to 'Y'`, backtick `` `X` to `Y` ``. Normalize quote delimiters to `"` before pattern match.
-
-**Recommended implementation approach:**
-1. First apply a pre-normalization step on `commentText`:
-   - Quote normalization: replace `'` (U+2018/U+2019 curly singles + U+0027 ASCII single) around tokens with `"`; replace backticks `` ` `` around tokens with `"`.
-   - Arrow normalization: replace `→` (U+2192), `⇒` (U+21D2), `->` (2-char ASCII) with the literal word `to` when surrounded by quote-delimited or token-surrounded contexts.
-2. Then try the existing `please change` regex (now wider because quotes/arrows normalized), plus 2–3 complementary patterns for verb variants.
-3. Keep existing `requestedChange` return shape identical. No callers change.
-
-**Verification after edit:**
-- tsc diff against baseline → 0 drift.
-- `npx.cmd tsx tools/testOptChain.ts` → distribution IDENTICAL to baseline (CEJ_182103's 26 explicit cases already match the existing regex, so this change doesn't improve CEJ numbers — that's expected). Write a quick ad-hoc `tsx -e` smoke test with synthetic comment text covering each new pattern to confirm they fire.
-- Optional: if any real sample files with non-`please change` phrasing exist (check if CBD_102008's 9 comments have any), run against those to confirm real improvement.
-
-**Estimated effort:** 30–60 mins + verification.
+**Verification (re-run to confirm no reversion < 60s):**
+- `npx.cmd tsx tools/testOptChain.ts` → numbers unchanged at **25 apply / 0 unknown** on CEJ_182103.
+- Commit-time synthetic verification from a47b92c commit message: 6/6 pattern variant classes (quoted change, Replace with, Update to, Swap for, arrow-derived, bare-token) each produce correct `{from,to}`; 4 normalization classes (curly doubles, curly singles, backticks, arrow symbols) each confirmed fire by Select-String live inspection.
+- Optional real-file cross-check (not required for close): run `testOptChain.ts` against `CBD_102008.xml` on disk to see real unknown delta if any.
 
 ---
 
@@ -256,53 +244,23 @@ Reconciled from [project-decision-brief.md § 6a](file:///c:/Users/Kevin/Desktop
 
 **Verified against real CEJ_182103.xml:** the sole bare-phrase item (order 10, `Pr—Co`) matched exactly one cluster of the 25 explicit sibling corrections, well above the N>=3 threshold, and flipped from human-review/unresolved to apply/ready, requiresGlimpse=true. Full chain: 25 apply, 0 human-review, 2 no-action, 1 hold-for-jm (was 24/1/2/1). No other item's decision changed. tsc baseline: 0 drift. Encoding guard: PASS.
 
-**Goal:** Flip the bare-phrase `Pr—Co` class (and any structurally identical case in future files) from `human-review/unresolved` → `apply/ready, requiresGlimpse=true`. On CEJ_182103 this converts exactly 1 item. On similar files with many repeated same-transformation comments it converts more.
+**What was built (cross-reference with live files to re-verify in 30s):**
 
-**Where:** `services/agents/optContextResolver.ts`, inside `resolveOptCommentContext()`, as a NEW POST-PASS after the existing per-item resolution loop.
+- **Resolver status union expanded:** `OptContextResolutionStatus` now includes `'resolved-by-sibling-pattern'` in [optContextResolver.ts line 5](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optContextResolver.ts#L5).
+- **Clustering post-pass ([lines 293–325](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optContextResolver.ts#L293-L325)):** `buildRequestedChangeClusters()` groups explicit `{from, to, order}` tuples by normalized pair, returns clusters.
+- **Bare-phrase resolver ([lines 345–397](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optContextResolver.ts#L345-L397)):** `resolveBareCandidateBySiblingPattern()` requires exact normalized match for `pattern.from`, clusterSize ≥ 3, runs locate on synthesized from→to, returns status `'resolved-by-sibling-pattern'` with supporting orders in reason string.
+- **Evidence gates hardcoded non-negotiable:** same-document only; min cluster 3; exact normalized-from match; if two DocumentPatterns share same `from` with different `to` → filter returns >1 match → function bails (see `matchingClusters.length === 1` guard at line 362).
+- **Wired into resolution loop ([lines 418–429](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/optContextResolver.ts#L418-L429)):** after regular per-item loop completes, builds clusters, then iterates every unresolved bare-phrase interpretation.
+- **Decision handling ([keeperDecisionAgent.ts lines 58–66](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/services/agents/keeperDecisionAgent.ts#L58-L66)):** case `'resolved-by-sibling-pattern'` → `action: 'apply'` + FORCES `requiresGlimpse: true` (even for clusterSize=25). No new contract fields.
 
-**What to build (3 steps, exact spec from [keeper-intelligence-and-learning-strategy.md § A1](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/keeper-intelligence-and-learning-strategy.md#L101)):**
+**How to re-verify everything works in < 60s:**
+```
+RUN THIS:
+npx.cmd tsx tools/testOptChain.ts | Select-String "FINAL TALLIES" -Context 0,4
+```
+Expected: Decision `apply:25, no-action:2, hold-for-jm:1`. Confirmed 2026-09-26. If regresses to `apply:24, human-review:1` → A1 is broken. Also check the order=10 row resolverStatus column = `resolved-by-sibling-pattern` AND glimpse column = `true`.
 
-**Step 1 — Clustering post-pass:**
-- Collect all `{from, to, commentOrder}` tuples produced by explicit "please change" cases (the ones where Interpreter already gave explicit `requestedChange`).
-- Cluster by `(normalized(from), normalized(to))` pair. Define `normalizeForMatching(s)` = case-fold + collapse whitespace + normalize Unicode variants.
-- For each cluster with size ≥ 3, emit a `DocumentPattern`:
-  ```ts
-  interface DocumentPattern {
-    from: string; normalized original text
-    to: string;   normalized replacement text
-    clusterSize: number;
-    supportingOrders: number[];
-  }
-  ```
-
-**Step 2 — Resolve bare phrases from patterns:**
-- Run AFTER regular per-item resolution. Iterate every interpretation with:
-  - `category === 'xml-correction'`
-  - Has NO explicit `requestedChange` (i.e., bare-phrase case that `isBarePhraseCorrectionMarker` flagged)
-  - Its current resolution (if any) is `unresolved`
-- For each such bare-phrase comment `B`:
-  - If `normalizeForMatching(B.content)` EXACTLY equals `pattern.from` of any DocumentPattern with clusterSize ≥ 3:
-    - Synthesize virtual `requestedChange: { from: B.content, to: pattern.to }`
-    - Run normal Resolver target-finding on synthesized `from`
-    - On literal match found: return **NEW status `'resolved-by-sibling-pattern'`** (add to `OptContextResolutionStatus` union; currently = `'resolved' | 'duplicate' | 'ambiguous' | 'unresolved'`)
-    - Reason string includes `patternSupportingOrders` list + `evidence: 'sibling-cluster-N'`
-
-**Evidence gating rules (NON-NEGOTIABLE):**
-- Same-document only. Never cross files.
-- Minimum cluster size ≥ 3 (not 1 or 2).
-- Bare-phrase content must be EXACT normalized match for `pattern.from`. No fuzzy.
-- If two DocumentPatterns share same `from` with different `to` → cluster poisoned, cannot use for any sibling.
-
-**Step 3 — Decision agent handling:**
-- `keeperDecisionAgent.ts` treats `'resolved-by-sibling-pattern'` identically to `'resolved'` → `decision: 'apply'`, but **FORCES `requiresGlimpse = true`** (even for clusterSize=25). Decision contract already has `requiresGlimpse` field; no new fields needed.
-
-**Verification:**
-- tsc baseline: 0 drift.
-- `tools/testOptChain.ts` on CEJ_182103: Decision distribution shifts from `24 apply, 1 human-review, 2 no-action, 1 hold-for-jm` → `25 apply, 0 human-review, 2 no-action, 1 hold-for-jm`. The 1 bare-phrase `Pr—Co` (order 10 / comment #8) flips. Confidence: still evidence-based (clusterSize=25, 25 supporting orders).
-- Confirm `requiresGlimpse=true` on the flipped item in output.
-- Ad-hoc test: synthetic file with clusterSize=2 (below threshold) → bare phrase should NOT resolve, stays human-review. Confirms threshold gating works.
-
-**Estimated effort:** 1–2 sessions. Self-contained. High leverage on repeated-pattern file classes.
+**Full design rationale + edge-case gating:** [keeper-intelligence-and-learning-strategy.md § A1](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/keeper-intelligence-and-learning-strategy.md#L101). No change planned to A1 until battle-tested on ≥ 5 real files.
 
 ---
 
@@ -310,7 +268,13 @@ Reconciled from [project-decision-brief.md § 6a](file:///c:/Users/Kevin/Desktop
 
 **Goal:** Build the Act stage. Replace `xmlTagCleaner.ts`'s destructive OPT logic with per-item decision-driven mutation. This is the project's biggest remaining structural change.
 
-**ONLY START THIS after Steps 2+3 above are done.** Reason: Steps 2+3 materially change the real decision distribution (many more `apply`s). Build executor against the real distribution, not the artificially sparse pre-A1/pre-A4 one.
+**GATING RULES (updated 2026-09-26 after KB-001 discovery, A4 full completion, A1 full completion):**
+- NEXT STEP 3 (A1 Sibling Resolver): ✅ SIBLING RESOLVER CALLED UNCONDITIONALLY IN BOTH ENTRY POINTS (KB-001 CLOSED 2026-09-26 commit e3216a1; kb001-repro.ts exit 0)
+- NEXT STEP 2 (A4 Phrase Expansion): ✅ FULLY COMPLETE HEAD commit a47b92c. Live verification shows 5 quoted + 5 bare anchored patterns + 4-class quote/arrow normalization on disk.
+- **SECOND SAFE-TO-START CONDITION:** Optionally build a quick real-file evidence cross-check on CBD_102008's 9 real comments to confirm A4 produces 0 unknowns there too. Not mandatory; KB-001 fixes the far more severe correctness gap.
+- **Reason for the KB-001-first gate:** NEXT STEP 3 materially changes real decision distribution (1 more apply, 1 fewer human-review, glimpse correctly set true on sibling items). Build executor against the real post-KB-001 distribution, not the artificially sparse one where the test harness says 25 apply but real pipeline silently gives 24 + 1 human-review with glimpse=false — the Executor's glimpse gating would then be tested against wrong truths.
+
+> Historical note: NEXT STEP 4 Executor module (Stage 5 mechanical edits) exists on disk at services/agents/executor.ts (341 lines), verified via testExecutor.ts at 0 errors / 27 applied / 1 skipped on CEJ_182103.xml. Open work = pipeline orchestration wire-up in Phase 4 below.
 
 **Exact spec:** See [project-decision-brief.md § Priority 4](file:///c:/Users/Kevin/Desktop/FL-Xtools/Production-Toolkit-Agent/docs/project-decision-brief.md#L308). Key design rules:
 
@@ -399,7 +363,7 @@ From [project-decision-brief.md § 8](file:///c:/Users/Kevin/Desktop/FL-Xtools/P
 - [ ] Ran `npx.cmd tsc --noEmit --project tsconfig.json` → DIFFED against `docs/baseline-tsc-errors.txt` → 0 delta. (Never compare to prose "29 errors"; compare to the actual artefact.)
 - [ ] Ran `npm.cmd run check:encoding` → PASS. (or `powershell -ExecutionPolicy Bypass -File tools/checkEncoding.ps1`)
 - [ ] New files written BOM-less via documented pattern.
-- [ ] `npx.cmd tsx tools/testOptChain.ts` → same 24/1/2/1 distribution on CEJ_182103 (or updated distribution if the commit intentionally changes it — document the expected delta).
+- [ ] `npx.cmd tsx tools/testOptChain.ts` → same `25 apply, 0 human-review, 2 no-action, 1 hold-for-jm` distribution on CEJ_182103 (or updated distribution if the commit intentionally changes it — document the expected delta).
 - [ ] If Phase 0.4 live: `runProductionPipeline().optChain.validation.total` still matches `testOptChain.ts` validator count.
 - [ ] Any new decision path gated on CONCRETE evidence (structural ID, Resolver match, ≥3 siblings, codebook rule id), NOT on Interpreter's `confidence` label.
 - [ ] No responsibility boundary crossings (e.g., Decision didn't do string replacements; Interpreter didn't look at sibling items).
